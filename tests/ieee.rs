@@ -5,7 +5,6 @@ use core::cmp::Ordering;
 use rustc_apfloat::ieee::{BFloat, Double, Float8E4M3FN, Float8E5M2, Half, Quad, Single, X87DoubleExtended};
 use rustc_apfloat::{Category, ExpInt, IEK_INF, IEK_NAN, IEK_ZERO};
 use rustc_apfloat::{Float, FloatConvert, Round, Status};
-use std::ops::Neg;
 
 // FIXME(eddyb) maybe include this in `rustc_apfloat` itself?
 macro_rules! define_for_each_float_type {
@@ -798,17 +797,27 @@ fn maximum() {
 
 #[test]
 fn sqrt() {
-    let f1 = Double::from_f64(64.);
-    let f2 = Double::from_f64(8.);
-    assert_eq!(f1.sqrt().to_f64(), f2.to_f64());
-    assert_eq!(f1.sqrt().to_f64(), 64_f64.sqrt());
-    assert_eq!(f2.sqrt().to_f64(), 8_f64.sqrt());
-    assert_eq!(Double::INFINITY.sqrt().to_f64(), f64::INFINITY);
-    assert_eq!(Double::ZERO.sqrt().to_f64().total_cmp(&0.0), std::cmp::Ordering::Equal);
-    assert_eq!((-Double::ZERO).sqrt().to_f64().total_cmp(&-0.0), std::cmp::Ordering::Equal);
-    assert!(Double::from_f64(-5.0).sqrt().is_nan());
-    assert!(Double::INFINITY.neg().sqrt().is_nan());
-    assert!(Double::NAN.sqrt().is_nan());
+    for_each_float_type!(for<F: Float> test::<F>());
+    fn test<F: Float>() {
+        assert!(F::ZERO.sqrt().bitwise_eq(F::ZERO));
+        assert!((-F::ZERO).sqrt().bitwise_eq(-F::ZERO));
+        assert!(F::INFINITY.sqrt().bitwise_eq(F::INFINITY));
+        assert!(F::NAN.sqrt().is_nan());
+        assert!((-F::INFINITY).sqrt().is_nan());
+        assert!((-F::from_u128(5).value).sqrt().is_nan());
+        let one = F::from_u128(1).value;
+        assert!(one.sqrt().bitwise_eq(one));
+        let f1 = F::from_u128(64).value;
+        let f2 = F::from_u128(8).value;
+        assert!(f1.sqrt().bitwise_eq(f2));
+    }
+
+    // Cross-check against host sqrt
+    // TODO: This is only f32 and f64 for now since they are stable, update to other values later.
+    for x in  0..1000 {
+        assert_eq!(Single::from_u128(x).value.sqrt().to_f32(), f32::sqrt(x as f32));
+        assert_eq!(Double::from_u128(x).value.sqrt().to_f64(), f64::sqrt(x as f64));
+    }
 }
 
 #[test]
