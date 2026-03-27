@@ -800,16 +800,13 @@ fn maximum() {
 fn sqrt() {
     let f1 = Double::from_f64(64.);
     let f2 = Double::from_f64(8.);
-    let infinity = Double::INFINITY;
-    let nan = Double::NAN;
-    let negative_infinity = Double::INFINITY.neg();
     assert_eq!(f1.sqrt().to_f64(), f2.to_f64());
-    assert_eq!(infinity.sqrt().to_f64(), infinity.to_f64());
+    assert_eq!(Double::INFINITY.sqrt().to_f64(), f64::INFINITY);
     assert_eq!(Double::ZERO.sqrt().to_f64().total_cmp(&0.0), std::cmp::Ordering::Equal);
     assert_eq!((-Double::ZERO).sqrt().to_f64().total_cmp(&-0.0), std::cmp::Ordering::Equal);
     assert!(Double::from_f64(-5.0).sqrt().is_nan());
-    assert!(negative_infinity.sqrt().is_nan());
-    assert!(nan.sqrt().is_nan());
+    assert!(Double::INFINITY.neg().sqrt().is_nan());
+    assert!(Double::NAN.sqrt().is_nan());
 }
 
 #[test]
