@@ -814,7 +814,7 @@ fn sqrt() {
 
     // Cross-check against host sqrt
     // TODO: This is only f32 and f64 for now since they are stable, update to other values later.
-    for x in  0..1000 {
+    for x in 0..1000 {
         assert_eq!(Single::from_u128(x).value.sqrt().to_f32(), f32::sqrt(x as f32));
         assert_eq!(Double::from_u128(x).value.sqrt().to_f64(), f64::sqrt(x as f64));
     }
