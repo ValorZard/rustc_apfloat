@@ -2,10 +2,10 @@
 extern crate rustc_apfloat;
 
 use core::cmp::Ordering;
-use std::ops::Neg;
 use rustc_apfloat::ieee::{BFloat, Double, Float8E4M3FN, Float8E5M2, Half, Quad, Single, X87DoubleExtended};
 use rustc_apfloat::{Category, ExpInt, IEK_INF, IEK_NAN, IEK_ZERO};
 use rustc_apfloat::{Float, FloatConvert, Round, Status};
+use std::ops::Neg;
 
 // FIXME(eddyb) maybe include this in `rustc_apfloat` itself?
 macro_rules! define_for_each_float_type {
@@ -807,7 +807,7 @@ fn sqrt() {
     assert_eq!(infinity.sqrt().to_f64(), infinity.to_f64());
     assert_eq!(Double::ZERO.sqrt().to_f64().total_cmp(&0.0), std::cmp::Ordering::Equal);
     assert_eq!((-Double::ZERO).sqrt().to_f64().total_cmp(&-0.0), std::cmp::Ordering::Equal);
-    assert!((-Double::from_f64(5.0)).sqrt().is_nan());
+    assert!(Double::from_f64(-5.0).sqrt().is_nan());
     assert!(negative_infinity.sqrt().is_nan());
     assert!(nan.sqrt().is_nan());
 }
