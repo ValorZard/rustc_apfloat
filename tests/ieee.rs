@@ -2,6 +2,7 @@
 extern crate rustc_apfloat;
 
 use core::cmp::Ordering;
+use std::ops::Neg;
 use rustc_apfloat::ieee::{BFloat, Double, Float8E4M3FN, Float8E5M2, Half, Quad, Single, X87DoubleExtended};
 use rustc_apfloat::{Category, ExpInt, IEK_INF, IEK_NAN, IEK_ZERO};
 use rustc_apfloat::{Float, FloatConvert, Round, Status};
@@ -797,20 +798,18 @@ fn maximum() {
 
 #[test]
 fn sqrt() {
-    assert_eq!(64_f32.sqrt(), 8_f32);
-    assert_eq!(64_f64.sqrt(), 8_f64);
-    assert_eq!(f32::INFINITY.sqrt(), f32::INFINITY);
-    assert_eq!(f64::INFINITY.sqrt(), f64::INFINITY);
-    assert_eq!(0.0_f32.sqrt().total_cmp(&0.0), std::cmp::Ordering::Equal);
-    assert_eq!(0.0_f64.sqrt().total_cmp(&0.0), std::cmp::Ordering::Equal);
-    assert_eq!((-0.0_f32).sqrt().total_cmp(&-0.0), std::cmp::Ordering::Equal);
-    assert_eq!((-0.0_f64).sqrt().total_cmp(&-0.0), std::cmp::Ordering::Equal);
-    assert!((-5.0_f32).sqrt().is_nan());
-    assert!((-5.0_f64).sqrt().is_nan());
-    assert!(f32::NEG_INFINITY.sqrt().is_nan());
-    assert!(f64::NEG_INFINITY.sqrt().is_nan());
-    assert!(f32::NAN.sqrt().is_nan());
-    assert!(f64::NAN.sqrt().is_nan());
+    let f1 = Double::from_f64(64.);
+    let f2 = Double::from_f64(8.);
+    let infinity = Double::INFINITY;
+    let nan = Double::NAN;
+    let negative_infinity = Double::INFINITY.neg();
+    assert_eq!(f1.sqrt().to_f64(), f2.to_f64());
+    assert_eq!(infinity.sqrt().to_f64(), infinity.to_f64());
+    assert_eq!(Double::ZERO.sqrt().to_f64().total_cmp(&0.0), std::cmp::Ordering::Equal);
+    assert_eq!((-Double::ZERO).sqrt().to_f64().total_cmp(&-0.0), std::cmp::Ordering::Equal);
+    assert!((-Double::from_f64(5.0)).sqrt().is_nan());
+    assert!(negative_infinity.sqrt().is_nan());
+    assert!(nan.sqrt().is_nan());
 }
 
 #[test]
