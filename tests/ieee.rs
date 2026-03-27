@@ -801,6 +801,8 @@ fn sqrt() {
     let f1 = Double::from_f64(64.);
     let f2 = Double::from_f64(8.);
     assert_eq!(f1.sqrt().to_f64(), f2.to_f64());
+    assert_eq!(f1.sqrt().to_f64(), 64_f64.sqrt());
+    assert_eq!(f2.sqrt().to_f64(), 8_f64.sqrt());
     assert_eq!(Double::INFINITY.sqrt().to_f64(), f64::INFINITY);
     assert_eq!(Double::ZERO.sqrt().to_f64().total_cmp(&0.0), std::cmp::Ordering::Equal);
     assert_eq!((-Double::ZERO).sqrt().to_f64().total_cmp(&-0.0), std::cmp::Ordering::Equal);
