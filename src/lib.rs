@@ -484,6 +484,8 @@ pub trait Float:
         }
     }
 
+    /// Technically this should be StatusAnd<Self>, but since sqrt is exact for all supported formats, 
+    /// we can just round to the nearest, ignore exceptions, and return Self.
     fn sqrt(self) -> Self {
         match self.category() {
             // preserve zero sign
