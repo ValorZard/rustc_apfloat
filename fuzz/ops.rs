@@ -286,7 +286,7 @@ struct FuzzOp {
                     } else {
                         unreachable!()
                     }
-                }  
+                }
 
                 // HACK(eddyb) `APFloat` doesn't overload `operator%`, so we have
                 // to go through the `mod` method instead.
