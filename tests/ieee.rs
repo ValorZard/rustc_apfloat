@@ -35,6 +35,43 @@ define_for_each_float_type! {
     rustc_apfloat::ppc::DoubleDouble,
 }
 
+macro_rules! for_each_ieee_float_type {
+    (for<$ty_var:ident: Float> $e:expr) => {{
+        {
+            type $ty_var = Half;
+            $e;
+        }
+        {
+            type $ty_var = Single;
+            $e;
+        }
+        {
+            type $ty_var = Double;
+            $e;
+        }
+        {
+            type $ty_var = Quad;
+            $e;
+        }
+        {
+            type $ty_var = BFloat;
+            $e;
+        }
+        {
+            type $ty_var = Float8E5M2;
+            $e;
+        }
+        {
+            type $ty_var = Float8E4M3FN;
+            $e;
+        }
+        {
+            type $ty_var = X87DoubleExtended;
+            $e;
+        }
+    }};
+}
+
 trait SingleExt {
     fn from_f32(input: f32) -> Self;
     fn to_f32(self) -> f32;
@@ -797,7 +834,7 @@ fn maximum() {
 
 #[test]
 fn sqrt() {
-    for_each_float_type!(for<F: Float> test::<F>());
+    for_each_ieee_float_type!(for<F: Float> test::<F>());
     fn test<F: Float>() {
         assert!(F::ZERO.sqrt().bitwise_eq(F::ZERO));
         assert!((-F::ZERO).sqrt().bitwise_eq(-F::ZERO));

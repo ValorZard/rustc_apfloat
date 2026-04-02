@@ -484,95 +484,10 @@ pub trait Float:
         }
     }
 
-    /// Technically this should be StatusAnd<Self>, but since sqrt is exact for all supported formats,
-    /// we can just round to the nearest, ignore exceptions, and return Self.
+    /// IEEE-754R sqrt: Returns the correctly rounded square root of the current value
+    /// Note: we currently don't support raising any exceptions from sqrt, so the result is always exact and the status is always OK.
     fn sqrt(self) -> Self {
-        match self.category() {
-            // preserve zero sign
-            Category::Zero => self,
-            // propagate NaN
-            // If the input is a signalling NaN, then IEEE 754 requires the result to be converted to a quiet NaN. 
-            // On most CPUs that means the most significant bit of the significand field is 0 for signalling NaNs and 1 for quiet NaNs. 
-            // On most CPUs they quiet a NaN by setting that bit to a 1, RISC-V instead returns the canonical NaN with positive sign, 
-            // the most significant significand bit set and all other significand bits cleared.
-            // However, Rust and LLVM allow input NaNs to be returned unmodified as well as a few other options -- see Rust's rules for NaNs.
-            // https://doc.rust-lang.org/std/primitive.f32.html#nan-bit-patterns
-            // (Thanks @programmerjake for the comment)
-            Category::NaN => self,
-            // sqrt of negative number is NaN
-            _ if self.is_negative() => Self::NAN,
-            // sqrt(∞) = ∞
-            Category::Infinity => Self::INFINITY,
-            Category::Normal => {
-                // Floating point precision, excluding the integer bit
-                let prec = i32::try_from(Self::PRECISION).unwrap() - 1;
-
-                // x = 2^(exp - prec) * mant
-                // where mant is an integer with prec+1 bits
-                // mant is a u128, which should be large enough for the largest prec (112 for f128)
-                let mut exp = self.ilogb();
-                let mut mant = self.scalbn(prec - exp).to_u128(128).value;
-
-                if exp % 2 != 0 {
-                    // Make exponent even, so it can be divided by 2
-                    exp -= 1;
-                    mant <<= 1;
-                }
-
-                // Bit-by-bit (base-2 digit-by-digit) sqrt of mant.
-                // mant is treated here as a fixed point number with prec fractional bits.
-                // mant will be shifted left by one bit to have an extra fractional bit, which
-                // will be used to determine the rounding direction.
-
-                // res is the truncated sqrt of mant, where one bit is added at each iteration.
-                let mut res = 0u128;
-                // rem is the remainder with the current res
-                // rem_i = 2^i * ((mant<<1) - res_i^2)
-                // starting with res = 0, rem = mant<<1
-                let mut rem = mant << 1;
-                // s_i = 2*res_i
-                let mut s = 0u128;
-                // d is used to iterate over bits, from high to low (d_i = 2^(-i))
-                let mut d = 1u128 << (prec + 1);
-
-                // For iteration j=i+1, we need to find largest b_j = 0 or 1 such that
-                //  (res_i + b_j * 2^(-j))^2 <= mant<<1
-                // Expanding (a + b)^2 = a^2 + b^2 + 2*a*b:
-                //  res_i^2 + (b_j * 2^(-j))^2 + 2 * res_i * b_j * 2^(-j) <= mant<<1
-                // And rearranging the terms:
-                //  b_j^2 * 2^(-j) + 2 * res_i * b_j <= 2^j * (mant<<1 - res_i^2)
-                //  b_j^2 * 2^(-j) + 2 * res_i * b_j <= rem_i
-
-                while d != 0 {
-                    // Probe b_j^2 * 2^(-j) + 2 * res_i * b_j <= rem_i with b_j = 1:
-                    // t = 2*res_i + 2^(-j)
-                    let t = s + d;
-                    if rem >= t {
-                        // b_j should be 1, so make res_j = res_i + 2^(-j) and adjust rem
-                        res += d;
-                        s += d + d;
-                        rem -= t;
-                    }
-                    // Adjust rem for next iteration
-                    rem <<= 1;
-                    // Shift iterator
-                    d >>= 1;
-                }
-
-                // Remove extra fractional bit from result, rounding to nearest.
-                // If the last bit is 0, then the nearest neighbor is definitely the lower one.
-                // If the last bit is 1, it sounds like this may either be a tie (if there's
-                // infinitely many 0s after this 1), or the nearest neighbor is the upper one.
-                // However, since square roots are either exact or irrational, and an exact root
-                // would lead to the last "extra" bit being 0, we can exclude a tie in this case.
-                // We therefore always round up if the last bit is 1. When the last bit is 0,
-                // adding 1 will not do anything since the shift will discard it.
-                res = (res + 1) >> 1;
-
-                // Build resulting value with res as mantissa and exp/2 as exponent
-                Self::from_u128(res).value.scalbn(exp / 2 - prec)
-            }
-        }
+        unimplemented!()
     }
 
     /// IEEE-754R isSignMinus: Returns true if and only if the current value is

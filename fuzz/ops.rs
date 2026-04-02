@@ -16,8 +16,8 @@ enum OpKind {
     Binary(char),
     Ternary(Rust<&'static str>, Cxx<&'static str>),
 
-    // method-call ops, this one has the arity of 1 (so only 1 argument)
-    RustMethodArity1(Rust<&'static str>),
+    // A operation that's actually a method call in Rust, but only takes one argument (unary).
+    RustUnary(Rust<&'static str>),
 
     // HACK(eddyb) all other ops have floating-point inputs *and* outputs, so
     // the easiest way to fuzz conversions from/to other types, even if it won't
@@ -44,7 +44,7 @@ impl Type {
 impl OpKind {
     fn inputs<'a, T>(&self, all_inputs: &'a [T; 3]) -> &'a [T] {
         match self {
-            Unary(_) | RustMethodArity1(_) | Roundtrip(_) => &all_inputs[..1],
+            Unary(_) | RustUnary(_) | Roundtrip(_) => &all_inputs[..1],
             Binary(_) => &all_inputs[..2],
             Ternary(..) => &all_inputs[..3],
         }
@@ -64,7 +64,7 @@ const OPS: &[(&str, OpKind)] = &[
     ("MulAdd", Ternary(Rust("mul_add"), Cxx("fusedMultiplyAdd"))),
     // Method-call ops.
     // For now, sqrt is Rust-only, there is no C++ `APFloat` equivalent
-    ("Sqrt", RustMethodArity1(Rust("sqrt"))),
+    ("Sqrt", RustUnary(Rust("sqrt"))),
     // Roundtrip (`F -> T -> F`) ops.
     ("FToI128ToF", Roundtrip(Type::SInt(128))),
     ("FToU128ToF", Roundtrip(Type::UInt(128))),
@@ -160,7 +160,7 @@ impl<HF> FuzzOp<HF>
             Ternary(Rust(method), _) => {
                 format!("{}.{method}({}, {})", inputs[0], inputs[1], inputs[2])
             }
-            RustMethodArity1(Rust(method)) => {
+            RustUnary(Rust(method)) => {
                 format!("{}.{method}()", inputs[0])
             }
             Roundtrip(ty) => format!(
@@ -198,7 +198,7 @@ impl<F> FuzzOp<F>
             Ternary(Rust(method), _) => {
                 format!("{}.{method}({}).value", inputs[0], inputs[1..].join(", "))
             }
-            RustMethodArity1(Rust(method)) => {
+            RustUnary(Rust(method)) => {
                 format!("{}.{method}()", inputs[0])
             }
             Roundtrip(ty @ (Type::SInt(_) | Type::UInt(_))) => {
@@ -278,7 +278,7 @@ struct FuzzOp {
         + &all_ops_map_concat(|_tag, name, kind| {
             let inputs = kind.inputs(&["a.to_apf()", "b.to_apf()", "c.to_apf()"]);
             let expr = match kind {
-                RustMethodArity1(method_name) => {
+                RustUnary(method_name) => {
                     if method_name.0 == "sqrt" {
                         // For now, sqrt is the only Rust method-call op, and it has no C++ `APFloat` equivalent
                         // so don't generate any C++ code for it.
