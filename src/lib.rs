@@ -491,6 +491,13 @@ pub trait Float:
             // preserve zero sign
             Category::Zero => self,
             // propagate NaN
+            // If the input is a signalling NaN, then IEEE 754 requires the result to be converted to a quiet NaN. 
+            // On most CPUs that means the most significant bit of the significand field is 0 for signalling NaNs and 1 for quiet NaNs. 
+            // On most CPUs they quiet a NaN by setting that bit to a 1, RISC-V instead returns the canonical NaN with positive sign, 
+            // the most significant significand bit set and all other significand bits cleared.
+            // However, Rust and LLVM allow input NaNs to be returned unmodified as well as a few other options -- see Rust's rules for NaNs.
+            // https://doc.rust-lang.org/std/primitive.f32.html#nan-bit-patterns
+            // (Thanks @programmerjake for the comment)
             Category::NaN => self,
             // sqrt of negative number is NaN
             _ if self.is_negative() => Self::NAN,
