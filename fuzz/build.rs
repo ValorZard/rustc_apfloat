@@ -41,7 +41,7 @@ fn main() -> std::io::Result<ExitCode> {
         }
     }
 
-    let sh_script_exit_status = Command::new("sh")
+    let sh_script_exit_status = Command::new("bash")
         .args(["-c", SH_SCRIPT])
         .envs([
             ("llvm_project_git_hash", llvm_commit_hash),
@@ -66,6 +66,7 @@ set -e
 llvm_project_tgz_url="https://codeload.github.com/llvm/llvm-project/tar.gz/$llvm_project_git_hash"
 curl -sS "$llvm_project_tgz_url" | tar -C "$OUT_DIR" -xz
 llvm="$OUT_DIR"/llvm-project-"$llvm_project_git_hash"/llvm
+set -eux
 
 mkdir -p "$OUT_DIR"/fake-config/llvm/Config
 touch "$OUT_DIR"/fake-config/llvm/Config/{abi-breaking,config,llvm-config}.h
