@@ -30,7 +30,6 @@
 //! This API is completely unstable and subject to change.
 
 #![no_std]
-#![deny(warnings)]
 #![forbid(unsafe_code)]
 
 #[macro_use]

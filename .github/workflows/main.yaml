@@ -4,6 +4,12 @@ on:
   pull_request:
   merge_group:
 
+env:
+  CARGO_TERM_COLOR: always
+  RUSTDOCFLAGS: -Dwarnings
+  RUSTFLAGS: -Dwarnings
+  RUST_BACKTRACE: full
+
 jobs:
   test:
     name: Test
