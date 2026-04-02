@@ -1,7 +1,6 @@
 name: CI
 on:
-  push:
-    branches-ignore: [main]
+  push: { branches: [main] }
   pull_request:
   merge_group:
 
