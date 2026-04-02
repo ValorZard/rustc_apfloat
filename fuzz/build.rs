@@ -1,8 +1,12 @@
+use std::env;
+use std::fs;
+use std::io;
+use std::path::PathBuf;
 use std::process::{Command, ExitCode};
 
 mod ops;
 
-fn main() -> std::io::Result<ExitCode> {
+fn main() -> io::Result<ExitCode> {
     // HACK(eddyb) disable the default of re-running the build script on *any*
     // change to *the entire source tree* (i.e. the default is roughly `./`).
     println!("cargo:rerun-if-changed=build.rs");
@@ -11,8 +15,8 @@ fn main() -> std::io::Result<ExitCode> {
     let (_, llvm_commit_hash) = env!("CARGO_PKG_VERSION").split_once("+llvm-").unwrap();
     assert_eq!(llvm_commit_hash.len(), 12);
 
-    let out_dir = std::path::PathBuf::from(std::env::var_os("OUT_DIR").unwrap());
-    std::fs::write(out_dir.join("generated_fuzz_ops.rs"), ops::generate_rust())?;
+    let out_dir = PathBuf::from(env::var_os("OUT_DIR").unwrap());
+    fs::write(out_dir.join("generated_fuzz_ops.rs"), ops::generate_rust())?;
 
     // FIXME(eddyb) add a way to disable the C++ build below, or automatically
     // disable it if on an unsupported target (e.g. Windows).
@@ -22,10 +26,23 @@ fn main() -> std::io::Result<ExitCode> {
     }
 
     let mut cxx_exported_symbols = vec![];
-    std::fs::write(
+    fs::write(
         out_dir.join("cxx_apf_fuzz.cpp"),
         ops::generate_cxx(&mut cxx_exported_symbols),
     )?;
+
+    let manifest_dir =
+        PathBuf::from(env::var_os("CARGO_MANIFEST_DIR").expect("CARGO_MANIFEST_DIR unset"));
+    let target_dir = env::var_os("CARGO_TARGET_DIR")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| manifest_dir.parent().unwrap().join("target"));
+    let llvm_dir = target_dir.join(format!("llvm-downloads/llvm-project-{llvm_commit_hash}"));
+    if !llvm_dir.try_exists().is_ok_and(|val| val) {
+        panic!(
+            "llvm dir `{llvm_dir:?}` does not exist or cannot be reached. \
+            Perhaps you need to run etc/download-llvm.sh?"
+        )
+    }
 
     // HACK(eddyb) work around https://github.com/rust-lang/cargo/issues/3676,
     // by removing the env vars that Cargo appears to hardcode.
@@ -34,15 +51,16 @@ fn main() -> std::io::Result<ExitCode> {
         ("SSL_CERT_FILE", "/etc/pki/tls/certs/ca-bundle.crt"),
     ];
     for &(var_name, cargo_hardcoded_value) in CARGO_HARDCODED_ENV_VARS {
-        if let Ok(value) = std::env::var(var_name) {
+        if let Ok(value) = env::var(var_name) {
             if value == cargo_hardcoded_value {
-                std::env::remove_var(var_name);
+                env::remove_var(var_name);
             }
         }
     }
 
     let sh_script_exit_status = Command::new("bash")
         .args(["-c", SH_SCRIPT])
+        .env("llvm", &llvm_dir.join("llvm"))
         .envs([
             ("llvm_project_git_hash", llvm_commit_hash),
             ("cxx_apf_fuzz_exports", &cxx_exported_symbols.join(",")),
@@ -61,11 +79,6 @@ fn main() -> std::io::Result<ExitCode> {
 
 // HACK(eddyb) should avoid shelling out, but for now this will suffice.
 const SH_SCRIPT: &str = r#"
-set -e
-
-llvm_project_tgz_url="https://codeload.github.com/llvm/llvm-project/tar.gz/$llvm_project_git_hash"
-curl -sS "$llvm_project_tgz_url" | tar -C "$OUT_DIR" -xz
-llvm="$OUT_DIR"/llvm-project-"$llvm_project_git_hash"/llvm
 set -eux
 
 mkdir -p "$OUT_DIR"/fake-config/llvm/Config
