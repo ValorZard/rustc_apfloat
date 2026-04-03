@@ -593,6 +593,7 @@ mod hardware_sqrt {
         status.and(Single::from_bits(x.to_bits().into()))
     }
 
+    #[allow(dead_code)]
     pub fn sqrtf64(mut x: f64, round: Round) -> StatusAnd<Double> {
         let mut csr_stash = 0u32;
         let mut csr = make_mxcsr_cw(round);
