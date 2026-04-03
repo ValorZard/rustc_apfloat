@@ -1,5 +1,7 @@
 /target
 /Cargo.lock
+compile_commands.json
+.cache
 
 # Fuzzing data/state.
 /fuzz/in*

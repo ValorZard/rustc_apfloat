@@ -6,10 +6,25 @@ use std::process::{Command, ExitCode};
 
 mod ops;
 
+// NB: Any new symbols exported from the C++ source file need to be listed here,
+// everything else will get pruned.
+const CXX_EXPORTED_SYMBOLS: &[&str] = &[
+    "cxx_apf_eval_op_brainf16",
+    "cxx_apf_eval_op_ieee16",
+    "cxx_apf_eval_op_ieee32",
+    "cxx_apf_eval_op_ieee64",
+    "cxx_apf_eval_op_ieee128",
+    "cxx_apf_eval_op_ppcdoubledouble",
+    "cxx_apf_eval_op_f8e5m2",
+    "cxx_apf_eval_op_f8e4m3fn",
+    "cxx_apf_eval_op_x87_f80",
+];
+
 fn main() -> io::Result<ExitCode> {
-    // HACK(eddyb) disable the default of re-running the build script on *any*
-    // change to *the entire source tree* (i.e. the default is roughly `./`).
-    println!("cargo:rerun-if-changed=build.rs");
+    // Only rerun if sources run by the fuzzer change
+    println!("cargo::rerun-if-changed=build.rs");
+    println!("cargo::rerun-if-changed=cxx");
+    println!("cargo::rerun-if-changed=src/apf_fuzz.cpp");
 
     // NOTE(eddyb) `rustc_apfloat`'s own `build.rs` validated the version string.
     let (_, llvm_commit_hash) = env!("CARGO_PKG_VERSION").split_once("+llvm-").unwrap();
@@ -24,12 +39,6 @@ fn main() -> io::Result<ExitCode> {
     if !cxx {
         return Ok(ExitCode::SUCCESS);
     }
-
-    let mut cxx_exported_symbols = vec![];
-    fs::write(
-        out_dir.join("cxx_apf_fuzz.cpp"),
-        ops::generate_cxx(&mut cxx_exported_symbols),
-    )?;
 
     let manifest_dir =
         PathBuf::from(env::var_os("CARGO_MANIFEST_DIR").expect("CARGO_MANIFEST_DIR unset"));
@@ -91,7 +100,7 @@ fn main() -> io::Result<ExitCode> {
         .arg("--include")
         .arg(manifest_dir.join("cxx/fuzz_unity_build.cpp"))
         .arg("--include")
-        .arg(out_dir.join("cxx_apf_fuzz.cpp"))
+        .arg(manifest_dir.join("src/apf_fuzz.cpp"))
         .args(["-c", "-emit-llvm", "-o"])
         .arg(&bc_out);
     println!("+ {clang:?}");
@@ -101,7 +110,7 @@ fn main() -> io::Result<ExitCode> {
     let mut opt = Command::new("opt");
     opt.env_clear()
         .arg("--internalize-public-api-list")
-        .arg(cxx_exported_symbols.join(","))
+        .arg(CXX_EXPORTED_SYMBOLS.join(","))
         .arg(&bc_out)
         .arg("-o")
         .arg(&bc_opt_out);

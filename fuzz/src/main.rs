@@ -1,7 +1,6 @@
 use clap::{CommandFactory, Parser, Subcommand};
 use rustc_apfloat::Float as _;
 use std::io::Write;
-use std::mem::MaybeUninit;
 use std::num::NonZeroUsize;
 use std::path::PathBuf;
 use std::{fmt, mem};
@@ -166,15 +165,39 @@ macro_rules! float_reprs {
                     Self(bits.try_into().unwrap())
                 }
 
+                // FIXME: we are discarding status results here and not making use of rounding mode.
                 fn cxx_apf_eval_fuzz_op(op: FuzzOp<Self>) -> Self {
                     extern "C" {
-                        fn $cxx_apf_eval_fuzz_op(out: &mut MaybeUninit<$name>, op: FuzzOp<$name>);
+                        fn $cxx_apf_eval_fuzz_op(
+                            opcode: u8,
+                            round: u8,
+                            ai: $repr,
+                            bi: $repr,
+                            ci: $repr,
+                            out: &mut $repr,
+                        ) -> u32;
                     }
-                    unsafe {
-                        let mut out = MaybeUninit::uninit();
-                        $cxx_apf_eval_fuzz_op(&mut out, op);
-                        out.assume_init()
-                    }
+                    let (ai, bi, ci)= match op {
+                        FuzzOp::Neg(a) => (a.0, 0, 0),
+                        FuzzOp::Add(a, b) => (a.0, b.0, 0),
+                        FuzzOp::Sub(a, b) => (a.0, b.0, 0),
+                        FuzzOp::Mul(a, b) => (a.0, b.0, 0),
+                        FuzzOp::Div(a, b) => (a.0, b.0, 0),
+                        FuzzOp::Rem(a, b) => (a.0, b.0, 0),
+                        FuzzOp::MulAdd(a, b, c) => (a.0, b.0, c.0),
+                        FuzzOp::FToI128ToF(a) => (a.0, 0, 0),
+                        FuzzOp::FToU128ToF(a) => (a.0, 0, 0),
+                        FuzzOp::FToSingleToF(a) => (a.0, 0, 0),
+                        FuzzOp::FToDoubleToF(a) => (a.0, 0, 0),
+                    };
+
+                    let mut out = 0;
+
+                    let _status = unsafe {
+                        $cxx_apf_eval_fuzz_op(op.tag(), 0, ai, bi, ci, &mut out)
+                    };
+
+                    Self(out)
                 }
 
                 fn hard_eval_fuzz_op_if_supported(_op: FuzzOp<Self>) -> Option<Self> {
@@ -209,45 +232,46 @@ macro_rules! float_reprs {
     }
 }
 
+// FIXME: missing PowerPC semantics
 float_reprs! {
     Ieee16(u16) {
         type RustcApFloat = rustc_apfloat::ieee::Half;
-        extern fn = cxx_apf_fuzz_eval_op_ieee16;
+        extern fn = cxx_apf_eval_op_ieee16;
     }
     Ieee32(u32) {
         type RustcApFloat = rustc_apfloat::ieee::Single;
-        extern fn = cxx_apf_fuzz_eval_op_ieee32;
+        extern fn = cxx_apf_eval_op_ieee32;
         type HardFloat = f32;
     }
     Ieee64(u64) {
         type RustcApFloat = rustc_apfloat::ieee::Double;
-        extern fn = cxx_apf_fuzz_eval_op_ieee64;
+        extern fn = cxx_apf_eval_op_ieee64;
         type HardFloat = f64;
     }
     Ieee128(u128) {
         type RustcApFloat = rustc_apfloat::ieee::Quad;
-        extern fn = cxx_apf_fuzz_eval_op_ieee128;
+        extern fn = cxx_apf_eval_op_ieee128;
     }
 
     // Non-standard IEEE-like formats.
     F8E5M2(u8) {
         type RustcApFloat = rustc_apfloat::ieee::Float8E5M2;
         const REPR_TAG = 8 + 0;
-        extern fn = cxx_apf_fuzz_eval_op_f8e5m2;
+        extern fn = cxx_apf_eval_op_f8e5m2;
     }
     F8E4M3FN(u8) {
         type RustcApFloat = rustc_apfloat::ieee::Float8E4M3FN;
         const REPR_TAG = 8 + 1;
-        extern fn = cxx_apf_fuzz_eval_op_f8e4m3fn;
+        extern fn = cxx_apf_eval_op_f8e4m3fn;
     }
     BrainF16(u16) {
         type RustcApFloat = rustc_apfloat::ieee::BFloat;
         const REPR_TAG = 16 + 1;
-        extern fn = cxx_apf_fuzz_eval_op_brainf16;
+        extern fn = cxx_apf_eval_op_brainf16;
     }
     X87_F80(u128) {
         type RustcApFloat = rustc_apfloat::ieee::X87DoubleExtended;
-        extern fn = cxx_apf_fuzz_eval_op_x87_f80;
+        extern fn = cxx_apf_eval_op_x87_f80;
     }
 }
 

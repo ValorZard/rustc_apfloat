@@ -8,13 +8,12 @@
 
 // HACK(eddyb) newtypes to make it easy to tell apart Rust vs C++ specifics.
 struct Rust<T>(T);
-struct Cxx<T>(T);
 
 use self::OpKind::*;
 enum OpKind {
     Unary(char),
     Binary(char),
-    Ternary(Rust<&'static str>, Cxx<&'static str>),
+    Ternary(Rust<&'static str>),
 
     // HACK(eddyb) all other ops have floating-point inputs *and* outputs, so
     // the easiest way to fuzz conversions from/to other types, even if it won't
@@ -58,7 +57,7 @@ const OPS: &[(&str, OpKind)] = &[
     ("Div", Binary('/')),
     ("Rem", Binary('%')),
     // Ternary (`(F, F) -> F`) ops.
-    ("MulAdd", Ternary(Rust("mul_add"), Cxx("fusedMultiplyAdd"))),
+    ("MulAdd", Ternary(Rust("mul_add"))),
     // Roundtrip (`F -> T -> F`) ops.
     ("FToI128ToF", Roundtrip(Type::SInt(128))),
     ("FToU128ToF", Roundtrip(Type::UInt(128))),
@@ -151,7 +150,7 @@ impl<HF> FuzzOp<HF>
         let expr = match kind {
             Unary(op) => format!("{op}{}", inputs[0]),
             Binary(op) => format!("{} {op} {}", inputs[0], inputs[1]),
-            Ternary(Rust(method), _) => {
+            Ternary(Rust(method)) => {
                 format!("{}.{method}({}, {})", inputs[0], inputs[1], inputs[2])
             }
             Roundtrip(ty) => format!(
@@ -186,7 +185,7 @@ impl<F> FuzzOp<F>
         let expr = match kind {
             Unary(op) => format!("{op}{}", inputs[0]),
             Binary(op) => format!("({} {op} {}).value", inputs[0], inputs[1]),
-            Ternary(Rust(method), _) => {
+            Ternary(Rust(method)) => {
                 format!("{}.{method}({}).value", inputs[0], inputs[1..].join(", "))
             }
             Roundtrip(ty @ (Type::SInt(_) | Type::UInt(_))) => {
@@ -223,160 +222,4 @@ impl<F> FuzzOp<F>
         }
     }
 }"
-}
-
-pub fn generate_cxx(exported_symbols: &mut Vec<String>) -> String {
-    String::new()
-        + r#"
-#include <array>
-#include <llvm/ADT/APFloat.h>
-
-using namespace llvm;
-
-#pragma clang diagnostic error "-Wall"
-#pragma clang diagnostic error "-Wextra"
-#pragma clang diagnostic error "-Wunknown-attributes"
-
-using uint128_t = __uint128_t;
-
-template<typename F>
-struct FuzzOp {
-    enum : uint8_t {"#
-        + &all_ops_map_concat(|tag, name, _kind| {
-            format!(
-                "
-        {name} = {tag},"
-            )
-        })
-        + "
-    } tag;
-    F a, b, c;
-
-    F eval() const {
-
-        // HACK(eddyb) 'scratch' variables used by expressions below.
-        APFloat r(0.0);
-        APSInt i;
-        bool scratch_bool;
-
-        switch(tag) {
-            "
-        + &all_ops_map_concat(|_tag, name, kind| {
-            let inputs = kind.inputs(&["a.to_apf()", "b.to_apf()", "c.to_apf()"]);
-            let expr = match kind {
-                // HACK(eddyb) `APFloat` doesn't overload `operator%`, so we have
-                // to go through the `mod` method instead.
-                Binary('%') => format!("((r = {}), r.mod({}), r)", inputs[0], inputs[1]),
-
-                Unary(op) => format!("{op}{}", inputs[0]),
-                Binary(op) => format!("{} {op} {}", inputs[0], inputs[1]),
-
-                Ternary(_, Cxx(method)) => {
-                    format!(
-                        "((r = {}), r.{method}({}, {}, APFloat::rmNearestTiesToEven), r)",
-                        inputs[0], inputs[1], inputs[2]
-                    )
-                }
-
-                Roundtrip(ty @ (Type::SInt(_) | Type::UInt(_))) => {
-                    let (w, signed) = match ty {
-                        Type::SInt(w) => (w, true),
-                        Type::UInt(w) => (w, false),
-                        Type::Float(_) => unreachable!(),
-                    };
-                    format!(
-                        "((r = {}),
-                        (i = APSInt({w}, !{signed})),
-                        r.convertToInteger(i, APFloat::rmTowardZero, &scratch_bool),
-                        r.convertFromAPInt(i, {signed}, APFloat::rmNearestTiesToEven),
-                        r)",
-                        inputs[0]
-                    )
-                }
-                Roundtrip(Type::Float(w)) => {
-                    let cxx_apf_semantics = match w {
-                        32 => "APFloat::IEEEsingle()",
-                        64 => "APFloat::IEEEdouble()",
-                        _ => unreachable!(),
-                    };
-                    format!(
-                        "((r = {input}),
-                        r.convert({cxx_apf_semantics}, APFloat::rmNearestTiesToEven, &scratch_bool),
-                        r.convert({input}.getSemantics(), APFloat::rmNearestTiesToEven, &scratch_bool),
-                        r)",
-                        input = inputs[0]
-                    )
-                }
-            };
-            format!(
-                "
-            case {name}: return F::from_apf({expr});"
-            )
-        })
-        + "
-        }
-    }
-};
-" + &[
-        (16, "IEEEhalf"),
-        (32, "IEEEsingle"),
-        (64, "IEEEdouble"),
-        (128, "IEEEquad"),
-        (16, "BFloat"),
-        (8, "Float8E5M2"),
-        (8, "Float8E4M3FN"),
-        (80, "x87DoubleExtended"),
-    ]
-    .into_iter()
-    .map(|(w, cxx_apf_semantics): (usize, _)| {
-        let uint_width = w.next_power_of_two();
-        let name = match (w, cxx_apf_semantics) {
-            (16, "BFloat") => "BrainF16".into(),
-            (8, s) if s.starts_with("Float8") => s.replace("Float8", "F8"),
-            (80, "x87DoubleExtended") => "X87_F80".into(),
-            _ => {
-                assert!(cxx_apf_semantics.starts_with("IEEE"));
-                format!("IEEE{w}")
-            }
-        };
-        let exported_symbol = format!("cxx_apf_fuzz_eval_op_{}", name.to_ascii_lowercase());
-        exported_symbols.push(exported_symbol.clone());
-        let uint = format!("uint{uint_width}_t");
-        format!(
-            r#"
-struct __attribute__((packed)) {name} {{
-    {uint} bits;
-
-    // HACK(eddyb) these work around `APInt` only being convenient up to 64 bits.
-
-    static {name} from_apf(APFloat apf) {{
-        auto ap_bits = apf.bitcastToAPInt();
-        assert(ap_bits.getBitWidth() == {w});
-
-        {uint} bits = 0;
-        for(int i = 0; i < {w}; i += APInt::APINT_BITS_PER_WORD)
-            bits |= static_cast<{uint}>(
-                ap_bits.getRawData()[i / APInt::APINT_BITS_PER_WORD]
-            ) << i;
-        return {{ bits }};
-    }}
-
-    APFloat to_apf() const {{
-        std::array<
-            APInt::WordType,
-            ({w} + APInt::APINT_BITS_PER_WORD - 1) / APInt::APINT_BITS_PER_WORD
-        > words;
-        for(int i = 0; i < {w}; i += APInt::APINT_BITS_PER_WORD)
-            words[i / APInt::APINT_BITS_PER_WORD] = bits >> i;
-        return APFloat(APFloat::{cxx_apf_semantics}(), APInt({w}, words));
-    }}
-}};
-extern "C" {{
-    void {exported_symbol}({name} *out, FuzzOp<{name}> op) {{
-        *out = op.eval();
-    }}
-}}"#
-        )
-    })
-    .collect::<String>()
 }
