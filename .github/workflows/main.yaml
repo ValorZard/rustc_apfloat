@@ -18,13 +18,13 @@ jobs:
     strategy:
       matrix:
         include:
-          - build: nightly
+          - target: x86_64-unknown-linux-gnu
             os: ubuntu-24.04
-            rust: nightly
     steps:
     - uses: actions/checkout@v6
     - name: Install Rust
       run: rustup update nightly --no-self-update && rustup default nightly
+    - uses: Swatinem/rust-cache@v2
     - name: Build and run tests
       run: cargo test
 
@@ -39,7 +39,7 @@ jobs:
     - run: |
         msrv="$(
           cargo metadata --no-deps --format-version 1 |
-          jq -r '.packages .[] | | select(.name == "rustc_apfloat") | .rust_version'
+          jq -r '.packages | .[] | select(.name == "rustc_apfloat") | .rust_version'
         )"
         echo "MSRV: $msrv"
         echo "MSRV=$msrv" >> "$GITHUB_ENV"
