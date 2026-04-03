@@ -1,10 +1,7 @@
 use std::env;
-use std::fs;
 use std::io;
 use std::path::PathBuf;
-use std::process::{Command, ExitCode};
-
-mod ops;
+use std::process::Command;
 
 // NB: Any new symbols exported from the C++ source file need to be listed here,
 // everything else will get pruned.
@@ -20,7 +17,7 @@ const CXX_EXPORTED_SYMBOLS: &[&str] = &[
     "cxx_apf_eval_op_x87_f80",
 ];
 
-fn main() -> io::Result<ExitCode> {
+fn main() -> io::Result<()> {
     // Only rerun if sources run by the fuzzer change
     println!("cargo::rerun-if-changed=build.rs");
     println!("cargo::rerun-if-changed=cxx");
@@ -30,16 +27,14 @@ fn main() -> io::Result<ExitCode> {
     let (_, llvm_commit_hash) = env!("CARGO_PKG_VERSION").split_once("+llvm-").unwrap();
     assert_eq!(llvm_commit_hash.len(), 12);
 
-    let out_dir = PathBuf::from(env::var_os("OUT_DIR").unwrap());
-    fs::write(out_dir.join("generated_fuzz_ops.rs"), ops::generate_rust())?;
-
     // FIXME(eddyb) add a way to disable the C++ build below, or automatically
     // disable it if on an unsupported target (e.g. Windows).
     let cxx = true;
     if !cxx {
-        return Ok(ExitCode::SUCCESS);
+        return Ok(());
     }
 
+    let out_dir = PathBuf::from(env::var_os("OUT_DIR").unwrap());
     let manifest_dir =
         PathBuf::from(env::var_os("CARGO_MANIFEST_DIR").expect("CARGO_MANIFEST_DIR unset"));
     let target_dir = env::var_os("CARGO_TARGET_DIR")
@@ -156,5 +151,5 @@ fn main() -> io::Result<ExitCode> {
     println!("cargo:rustc-link-lib=cxx_apf_fuzz");
     println!("cargo:rustc-link-lib=stdc++");
 
-    Ok(ExitCode::SUCCESS)
+    Ok(())
 }

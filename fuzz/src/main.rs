@@ -1,12 +1,12 @@
+mod apf_fuzz;
+
+use apf_fuzz::FuzzOp;
 use clap::{CommandFactory, Parser, Subcommand};
 use rustc_apfloat::Float as _;
 use std::io::Write;
 use std::num::NonZeroUsize;
 use std::path::PathBuf;
 use std::{fmt, mem};
-
-// See `build.rs` and `ops.rs` for how `FuzzOp` is generated.
-include!(concat!(env!("OUT_DIR"), "/generated_fuzz_ops.rs"));
 
 #[derive(Clone, Parser, Debug)]
 struct Args {
