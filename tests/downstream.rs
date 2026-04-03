@@ -1,7 +1,7 @@
 //! Tests added to `rustc_apfloat`, that were not ported from the C++ code.
 
-use rustc_apfloat::ieee::{Double, Single, X87DoubleExtended};
-use rustc_apfloat::Float;
+use rustc_apfloat::ieee::{BFloat, Double, Float8E4M3FN, Float8E5M2, Half, Quad, Single, X87DoubleExtended};
+use rustc_apfloat::{Float, Round};
 
 // `f32 -> i128 -> f32` previously-crashing bit-patterns (found by fuzzing).
 pub const FUZZ_IEEE32_ROUNDTRIP_THROUGH_I128_CASES: &[u32] = &[
@@ -406,5 +406,67 @@ pub const FUZZ_X87_F80_NEG_CASES_WITH_EXPECTED_OUTPUTS: &[(u128, u128)] = &[
 fn fuzz_x87_f80_neg_with_expected_outputs() {
     for &(bits, expected_bits) in FUZZ_X87_F80_NEG_CASES_WITH_EXPECTED_OUTPUTS {
         assert_eq!((-X87DoubleExtended::from_bits(bits)).to_bits(), expected_bits);
+    }
+}
+
+macro_rules! for_each_ieee_float_type {
+    (for<$ty_var:ident: Float> $e:expr) => {{
+        {
+            type $ty_var = Half;
+            $e;
+        }
+        {
+            type $ty_var = Single;
+            $e;
+        }
+        {
+            type $ty_var = Double;
+            $e;
+        }
+        {
+            type $ty_var = Quad;
+            $e;
+        }
+        {
+            type $ty_var = BFloat;
+            $e;
+        }
+        {
+            type $ty_var = Float8E5M2;
+            $e;
+        }
+        {
+            type $ty_var = Float8E4M3FN;
+            $e;
+        }
+        {
+            type $ty_var = X87DoubleExtended;
+            $e;
+        }
+    }};
+}
+
+#[test]
+fn sqrt() {
+    for_each_ieee_float_type!(for<F: Float> test::<F>());
+    fn test<F: Float>() {
+        for round in [
+            Round::NearestTiesToEven,
+            Round::TowardPositive,
+            Round::TowardNegative,
+            Round::TowardZero,
+        ] {
+            assert!(F::ZERO.sqrt(round).bitwise_eq(F::ZERO));
+            assert!((-F::ZERO).sqrt(round).bitwise_eq(-F::ZERO));
+            assert!(F::INFINITY.sqrt(round).bitwise_eq(F::INFINITY));
+            assert!(F::NAN.sqrt(round).is_nan());
+            assert!((-F::INFINITY).sqrt(round).is_nan());
+            assert!((-F::from_u128(5).value).sqrt(round).is_nan());
+            let one = F::from_u128(1).value;
+            assert!(one.sqrt(round).bitwise_eq(one));
+            let f1 = F::from_u128(64).value;
+            let f2 = F::from_u128(8).value;
+            assert!(f1.sqrt(round).bitwise_eq(f2));
+        }
     }
 }

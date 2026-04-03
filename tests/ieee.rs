@@ -35,43 +35,6 @@ define_for_each_float_type! {
     rustc_apfloat::ppc::DoubleDouble,
 }
 
-macro_rules! for_each_ieee_float_type {
-    (for<$ty_var:ident: Float> $e:expr) => {{
-        {
-            type $ty_var = Half;
-            $e;
-        }
-        {
-            type $ty_var = Single;
-            $e;
-        }
-        {
-            type $ty_var = Double;
-            $e;
-        }
-        {
-            type $ty_var = Quad;
-            $e;
-        }
-        {
-            type $ty_var = BFloat;
-            $e;
-        }
-        {
-            type $ty_var = Float8E5M2;
-            $e;
-        }
-        {
-            type $ty_var = Float8E4M3FN;
-            $e;
-        }
-        {
-            type $ty_var = X87DoubleExtended;
-            $e;
-        }
-    }};
-}
-
 trait SingleExt {
     fn from_f32(input: f32) -> Self;
     fn to_f32(self) -> f32;
@@ -830,31 +793,6 @@ fn maximum() {
     assert_eq!(0.0, zn.maximum(zp).to_f64());
     assert!(f1.maximum(nan).to_f64().is_nan());
     assert!(nan.maximum(f1).to_f64().is_nan());
-}
-
-#[test]
-fn sqrt() {
-    for_each_ieee_float_type!(for<F: Float> test::<F>());
-    fn test<F: Float>() {
-        for round in [
-            Round::NearestTiesToEven,
-            Round::TowardPositive,
-            Round::TowardNegative,
-            Round::TowardZero,
-        ] {
-            assert!(F::ZERO.sqrt(round).bitwise_eq(F::ZERO));
-            assert!((-F::ZERO).sqrt(round).bitwise_eq(-F::ZERO));
-            assert!(F::INFINITY.sqrt(round).bitwise_eq(F::INFINITY));
-            assert!(F::NAN.sqrt(round).is_nan());
-            assert!((-F::INFINITY).sqrt(round).is_nan());
-            assert!((-F::from_u128(5).value).sqrt(round).is_nan());
-            let one = F::from_u128(1).value;
-            assert!(one.sqrt(round).bitwise_eq(one));
-            let f1 = F::from_u128(64).value;
-            let f2 = F::from_u128(8).value;
-            assert!(f1.sqrt(round).bitwise_eq(f2));
-        }
-    }
 }
 
 #[test]
