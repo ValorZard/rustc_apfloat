@@ -17,23 +17,36 @@ jobs:
     timeout-minutes: 20
     strategy:
       matrix:
-        build: [stable, beta, nightly]
         include:
-          - build: stable
-            os: ubuntu-24.04
-            rust: stable
-          - build: beta
-            os: ubuntu-24.04
-            rust: beta
           - build: nightly
             os: ubuntu-24.04
             rust: nightly
     steps:
     - uses: actions/checkout@v6
     - name: Install Rust
-      run: rustup update ${{ matrix.rust }} && rustup default ${{ matrix.rust }}
+      run: rustup update nightly --no-self-update && rustup default nightly
     - name: Build and run tests
       run: cargo test
+
+  msrv:
+    name: Check the MSRV
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    env:
+      RUSTFLAGS: # No need to check warnings on old MSRV, unset `-Dwarnings`
+    steps:
+    - uses: actions/checkout@v6
+    - run: |
+        msrv="$(
+          cargo metadata --no-deps --format-version 1 |
+          jq -r '.packages .[] | | select(.name == "rustc_apfloat") | .rust_version'
+        )"
+        echo "MSRV: $msrv"
+        echo "MSRV=$msrv" >> "$GITHUB_ENV"
+    - name: Install Rust
+      run: rustup update "$MSRV" --no-self-update && rustup default "$MSRV"
+    - uses: Swatinem/rust-cache@v2
+    - run: cargo build --package rustc_apfloat
 
   rustfmt:
     name: Rustfmt
@@ -42,5 +55,5 @@ jobs:
     steps:
     - uses: actions/checkout@v6
     - name: Install Rust
-      run: rustup update stable && rustup default stable && rustup component add rustfmt
+      run: rustup update stable --no-self-update && rustup default stable && rustup component add rustfmt
     - run: cargo fmt --check
