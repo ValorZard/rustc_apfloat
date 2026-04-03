@@ -9,3 +9,9 @@ afl = "0.15.10"
 clap = { version = "4.1.13", features = ["derive"] }
 num-traits = "0.2.15"
 rustc_apfloat = { path = ".." }
+
+[lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = [
+    # Set by the fuzzer
+    'cfg(fuzzing)',
+] }
