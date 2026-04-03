@@ -1893,7 +1893,7 @@ impl<S: Semantics> Float for IeeeFloat<S> {
         self.scalbn_r(-*exp, round)
     }
 
-    fn sqrt(self, round: Round) -> Self {
+    fn sqrt(self, round: Round) -> StatusAnd<Self> {
         self.ieee_sqrt(round)
     }
 }

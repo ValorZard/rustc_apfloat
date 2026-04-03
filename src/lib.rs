@@ -487,7 +487,7 @@ pub trait Float:
     /// IEEE-754R sqrt: Returns the correctly rounded square root of the current value
     /// Note: we currently don't support raising any exceptions from sqrt, so the result is always exact and the status is always OK.
     #[allow(unused_variables)]
-    fn sqrt(self, round: Round) -> Self {
+    fn sqrt(self, round: Round) -> StatusAnd<Self> {
         unimplemented!()
     }
 

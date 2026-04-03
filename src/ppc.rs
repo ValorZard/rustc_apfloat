@@ -366,7 +366,7 @@ where
     }
 
     #[allow(unused_variables)]
-    fn sqrt(self, round: Round) -> Self {
+    fn sqrt(self, round: Round) -> StatusAnd<Self> {
         unimplemented!()
     }
 

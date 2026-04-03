@@ -1,15 +1,15 @@
 use crate::{
     ieee::{IeeeDefaultExceptionHandling, IeeeFloat, Semantics},
-    Category, Float, Round, Status,
+    Category, Float, Round, Status, StatusAnd,
 };
 
 impl<S: Semantics> IeeeFloat<S> {
     /// This is a spec conformant implementation of the IEEE Float sqrt function
     /// This is put in downstream.rs because this function hasn't been implemented in the upstream C++ version yet.
-    pub(crate) fn ieee_sqrt(self, round: Round) -> Self {
+    pub(crate) fn ieee_sqrt(self, round: Round) -> StatusAnd<Self> {
         match self.category() {
             // preserve zero sign
-            Category::Zero => return self,
+            Category::Zero => return Status::OK.and(self),
             // propagate NaN
             // If the input is a signalling NaN, then IEEE 754 requires the result to be converted to a quiet NaN.
             // On most CPUs that means the most significant bit of the significand field is 0 for signalling NaNs and 1 for quiet NaNs.
@@ -18,11 +18,11 @@ impl<S: Semantics> IeeeFloat<S> {
             // However, Rust and LLVM allow input NaNs to be returned unmodified as well as a few other options -- see Rust's rules for NaNs.
             // https://doc.rust-lang.org/std/primitive.f32.html#nan-bit-patterns
             // (Thanks @programmerjake for the comment)
-            Category::NaN => return IeeeDefaultExceptionHandling::result_from_nan(self).value.copy_sign(Self::NAN),
+            Category::NaN => return IeeeDefaultExceptionHandling::result_from_nan(self.copy_sign(Self::NAN)),
             // sqrt of negative number is NaN
-            _ if self.is_negative() => return Self::NAN,
+            _ if self.is_negative() => return Status::INVALID_OP.and(Self::NAN),
             // sqrt(inf) = inf
-            Category::Infinity => return Self::INFINITY,
+            Category::Infinity => return Status::OK.and(Self::INFINITY),
             Category::Normal => (),
         }
 
@@ -119,6 +119,6 @@ impl<S: Semantics> IeeeFloat<S> {
         res >>= 1;
 
         // Build resulting value with res as mantissa and exp/2 as exponent
-        status.and(Self::from_u128(res).value.scalbn(exp / 2 - prec)).value
+        status.and(Self::from_u128(res).value.scalbn(exp / 2 - prec))
     }
 }
