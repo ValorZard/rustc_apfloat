@@ -237,8 +237,6 @@ using namespace llvm;
 #pragma clang diagnostic error "-Wextra"
 #pragma clang diagnostic error "-Wunknown-attributes"
 
-// HACK(eddyb) allow code below to assume `uintN_t` maps to Rust `uN`.
-// FIXME(eddyb) make sure this doesn't run into `u128` ABI issues.
 using uint128_t = __uint128_t;
 
 template<typename F>
@@ -374,7 +372,7 @@ struct __attribute__((packed)) {name} {{
     }}
 }};
 extern "C" {{
-    void {exported_symbol}({name} *out, const FuzzOp<{name}> &op) {{
+    void {exported_symbol}({name} *out, FuzzOp<{name}> op) {{
         *out = op.eval();
     }}
 }}"#

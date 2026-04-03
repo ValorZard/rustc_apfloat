@@ -168,14 +168,11 @@ macro_rules! float_reprs {
 
                 fn cxx_apf_eval_fuzz_op(op: FuzzOp<Self>) -> Self {
                     extern "C" {
-                        // HACK(eddyb) the warning is about `u128` ABI issues,
-                        // which is also why indirection is used.
-                        #[allow(improper_ctypes)]
-                        fn $cxx_apf_eval_fuzz_op(out: &mut MaybeUninit<$name>, op: &FuzzOp<$name>);
+                        fn $cxx_apf_eval_fuzz_op(out: &mut MaybeUninit<$name>, op: FuzzOp<$name>);
                     }
                     unsafe {
                         let mut out = MaybeUninit::uninit();
-                        $cxx_apf_eval_fuzz_op(&mut out, &op);
+                        $cxx_apf_eval_fuzz_op(&mut out, op);
                         out.assume_init()
                     }
                 }
