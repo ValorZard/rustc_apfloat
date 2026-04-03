@@ -365,7 +365,8 @@ where
         Fallback::from(self).next_up().map(Self::from)
     }
 
-    fn sqrt(self) -> Self {
+    #[allow(unused_variables)]
+    fn sqrt(self, round: Round) -> Self {
         unimplemented!()
     }
 

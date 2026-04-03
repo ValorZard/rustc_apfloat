@@ -1563,7 +1563,7 @@ impl<S: Semantics> Float for IeeeFloat<S> {
         }
     }
 
-    fn sqrt(self) -> Self {
+    fn sqrt(self, round: Round) -> Self {
         match self.category() {
             // preserve zero sign
             Category::Zero => return self,
@@ -1638,18 +1638,45 @@ impl<S: Semantics> Float for IeeeFloat<S> {
             d >>= 1;
         }
 
-        // Remove extra fractional bit from result, rounding to nearest.
-        // If the last bit is 0, then the nearest neighbor is definitely the lower one.
-        // If the last bit is 1, it sounds like this may either be a tie (if there's
-        // infinitely many 0s after this 1), or the nearest neighbor is the upper one.
-        // However, since square roots are either exact or irrational, and an exact root
-        // would lead to the last "extra" bit being 0, we can exclude a tie in this case.
-        // We therefore always round up if the last bit is 1. When the last bit is 0,
-        // adding 1 will not do anything since the shift will discard it.
-        res = (res + 1) >> 1;
+        let mut status = Status::OK;
 
-        // Build resulting value with res as mantissa and exp/2 as exponent.
-        Self::from_u128(res).value.scalbn(exp / 2 - prec)
+        // A nonzero remainder indicates that we could continue processing sqrt if we had
+        // more precision, potentially indefinitely. We don't because we have enough bits
+        // to fill our significand already, and only need the one extra bit to determine
+        // rounding.
+        if rem != 0 {
+            status = Status::INEXACT;
+
+            match round {
+                // If the LSB is 0, we should round down and this 1 gets cut off. If the LSB
+                // is 1, it is either a tie (if all remaining bits would be 0) or something
+                // that should be rounded up.
+                //
+                // Square roots are either exact or irrational, so a `1` in the extra bit
+                // already implies an irrational result with more `1`s in the infinite
+                // precision tail that should be rounded up, which this does. We are in a
+                // `rem != 0` block but could technically add the `1` unconditionally, given
+                // that a 0 in the extra bit would imply an exact result to be rounded down
+                // (and the extra bit is just shifted out).
+                Round::NearestTiesToEven => res += 1,
+                // We know we have an inexact result that needs rounding up. If the round
+                // bit is 1, adding 1 is sufficient and adding 2 does nothing extra (the
+                // new LSB will get truncated). If the round bit is 0, we need to add
+                // two anyway to affect the significand.
+                Round::TowardPositive => res += 2,
+                // By default, shifting will round down.
+                Round::TowardNegative => (),
+                // Same as negative since the result of sqrt is positive.
+                Round::TowardZero => (),
+                Round::NearestTiesToAway => unimplemented!("unsupported rounding mode"),
+            };
+        }
+
+        // Remove the extra fractional bit.
+        res >>= 1;
+
+        // Build resulting value with res as mantissa and exp/2 as exponent
+        status.and(Self::from_u128(res).value.scalbn(exp / 2 - prec)).value
     }
 
     fn from_bits(input: u128) -> Self {

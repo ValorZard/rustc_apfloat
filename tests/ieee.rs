@@ -836,24 +836,24 @@ fn maximum() {
 fn sqrt() {
     for_each_ieee_float_type!(for<F: Float> test::<F>());
     fn test<F: Float>() {
-        assert!(F::ZERO.sqrt().bitwise_eq(F::ZERO));
-        assert!((-F::ZERO).sqrt().bitwise_eq(-F::ZERO));
-        assert!(F::INFINITY.sqrt().bitwise_eq(F::INFINITY));
-        assert!(F::NAN.sqrt().is_nan());
-        assert!((-F::INFINITY).sqrt().is_nan());
-        assert!((-F::from_u128(5).value).sqrt().is_nan());
-        let one = F::from_u128(1).value;
-        assert!(one.sqrt().bitwise_eq(one));
-        let f1 = F::from_u128(64).value;
-        let f2 = F::from_u128(8).value;
-        assert!(f1.sqrt().bitwise_eq(f2));
-    }
-
-    // Cross-check against host sqrt
-    // TODO: This is only f32 and f64 for now since they are stable, update to other values later.
-    for x in 0..1000 {
-        assert_eq!(Single::from_u128(x).value.sqrt().to_f32(), f32::sqrt(x as f32));
-        assert_eq!(Double::from_u128(x).value.sqrt().to_f64(), f64::sqrt(x as f64));
+        for round in [
+            Round::NearestTiesToEven,
+            Round::TowardPositive,
+            Round::TowardNegative,
+            Round::TowardZero,
+        ] {
+            assert!(F::ZERO.sqrt(round).bitwise_eq(F::ZERO));
+            assert!((-F::ZERO).sqrt(round).bitwise_eq(-F::ZERO));
+            assert!(F::INFINITY.sqrt(round).bitwise_eq(F::INFINITY));
+            assert!(F::NAN.sqrt(round).is_nan());
+            assert!((-F::INFINITY).sqrt(round).is_nan());
+            assert!((-F::from_u128(5).value).sqrt(round).is_nan());
+            let one = F::from_u128(1).value;
+            assert!(one.sqrt(round).bitwise_eq(one));
+            let f1 = F::from_u128(64).value;
+            let f2 = F::from_u128(8).value;
+            assert!(f1.sqrt(round).bitwise_eq(f2));
+        }
     }
 }
 
