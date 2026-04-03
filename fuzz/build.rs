@@ -33,6 +33,7 @@ fn main() -> io::Result<ExitCode> {
 
     let manifest_dir =
         PathBuf::from(env::var_os("CARGO_MANIFEST_DIR").expect("CARGO_MANIFEST_DIR unset"));
+    let fake_include_dir = manifest_dir.join("cxx/include");
     let target_dir = env::var_os("CARGO_TARGET_DIR")
         .map(PathBuf::from)
         .unwrap_or_else(|| manifest_dir.parent().unwrap().join("target"));
@@ -61,6 +62,7 @@ fn main() -> io::Result<ExitCode> {
     let sh_script_exit_status = Command::new("bash")
         .args(["-c", SH_SCRIPT])
         .env("llvm", &llvm_dir.join("llvm"))
+        .env("manifest_dir", &manifest_dir)
         .envs([
             ("llvm_project_git_hash", llvm_commit_hash),
             ("cxx_apf_fuzz_exports", &cxx_exported_symbols.join(",")),
@@ -81,20 +83,6 @@ fn main() -> io::Result<ExitCode> {
 const SH_SCRIPT: &str = r#"
 set -eux
 
-mkdir -p "$OUT_DIR"/fake-config/llvm/Config
-touch "$OUT_DIR"/fake-config/llvm/Config/{abi-breaking,config,llvm-config}.h
-
-# HACK(eddyb) we want standard `assert`s to work, but `NDEBUG` also controls
-# unrelated LLVM facilities that are spread all over the place and it's harder
-# to compile all of them, than do this workaround where we shadow `assert.h`.
-echo -e '#undef NDEBUG\n#include_next <assert.h>\n#define NDEBUG' \
-  > "$OUT_DIR"/fake-config/assert.h
-
-# HACK(eddyb) bypass `$llvm/include/llvm/Support/DataTypes.h.cmake`.
-mkdir -p "$OUT_DIR"/fake-config/llvm/Support
-echo -e '#include <'{math,inttypes,stdint,sys/types}'.h>\n' \
-  > "$OUT_DIR"/fake-config/llvm/Support/DataTypes.h
-
 # FIXME(eddyb) maybe split `$clang_codegen_flags` into front-end vs back-end.
 clang_codegen_flags="-g -fPIC -fno-exceptions -O3 -march=native"
 
@@ -104,9 +92,10 @@ clang_codegen_flags="-g -fPIC -fno-exceptions -O3 -march=native"
 echo | clang++ -x c++ - -std=c++17 \
   $clang_codegen_flags \
   -I "$llvm"/include \
-  -I "$OUT_DIR"/fake-config \
+  -I "$llvm"/lib/Support \
+  -I "$manifest_dir/cxx/include" \
   -DNDEBUG -DHAVE_UNISTD_H -DLLVM_ON_UNIX -DLLVM_ENABLE_THREADS=0 \
-  --include="$llvm"/lib/Support/{APInt,APFloat,SmallVector,ErrorHandling}.cpp \
+  --include="$manifest_dir/cxx/fuzz_unity_build.cpp" \
   --include="$OUT_DIR"/cxx_apf_fuzz.cpp \
   -c -emit-llvm -o "$OUT_DIR"/cxx_apf_fuzz.bc
 
