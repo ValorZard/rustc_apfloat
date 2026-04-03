@@ -18,7 +18,7 @@ impl<S: Semantics> IeeeFloat<S> {
             // However, Rust and LLVM allow input NaNs to be returned unmodified as well as a few other options -- see Rust's rules for NaNs.
             // https://doc.rust-lang.org/std/primitive.f32.html#nan-bit-patterns
             // (Thanks @programmerjake for the comment)
-            Category::NaN => return IeeeDefaultExceptionHandling::result_from_nan(self.copy_sign(Self::NAN)),
+            Category::NaN => return IeeeDefaultExceptionHandling::result_from_nan(self),
             // sqrt of negative number is NaN
             _ if self.is_negative() => return Status::INVALID_OP.and(Self::NAN),
             // sqrt(inf) = inf
