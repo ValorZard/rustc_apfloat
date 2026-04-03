@@ -20,13 +20,13 @@ jobs:
         build: [stable, beta, nightly]
         include:
           - build: stable
-            os: ubuntu-latest
+            os: ubuntu-24.04
             rust: stable
           - build: beta
-            os: ubuntu-latest
+            os: ubuntu-24.04
             rust: beta
           - build: nightly
-            os: ubuntu-latest
+            os: ubuntu-24.04
             rust: nightly
     steps:
     - uses: actions/checkout@v3
@@ -37,7 +37,7 @@ jobs:
 
   rustfmt:
     name: Rustfmt
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
     - uses: actions/checkout@v3
