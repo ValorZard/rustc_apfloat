@@ -49,20 +49,6 @@ fn main() -> io::Result<()> {
         )
     }
 
-    // HACK(eddyb) work around https://github.com/rust-lang/cargo/issues/3676,
-    // by removing the env vars that Cargo appears to hardcode.
-    const CARGO_HARDCODED_ENV_VARS: &[(&str, &str)] = &[
-        ("SSL_CERT_DIR", "/etc/pki/tls/certs"),
-        ("SSL_CERT_FILE", "/etc/pki/tls/certs/ca-bundle.crt"),
-    ];
-    for &(var_name, cargo_hardcoded_value) in CARGO_HARDCODED_ENV_VARS {
-        if let Ok(value) = env::var(var_name) {
-            if value == cargo_hardcoded_value {
-                env::remove_var(var_name);
-            }
-        }
-    }
-
     let llvm_dir = llvm_root.join("llvm");
     let bc_out = out_dir.join("cxx_apf_fuzz.bc");
     let bc_opt_out = out_dir.join("cxx_apf_fuzz.opt.bc");
@@ -71,6 +57,9 @@ fn main() -> io::Result<()> {
 
     // Flags could probably be split between the frontend and backend.
     let clang_codegen_flags = ["-g", "-fPIC", "-fno-exceptions", "-O3", "-march=native"];
+
+    // Note that all commands clear the environment to work around
+    // https://github.com/rust-lang/cargo/issues/3676.
 
     // HACK(eddyb) first compile all the source files into one `.bc` file:
     // - "unity build" (w/ `--include`) lets `-o` specify path (no `--out-dir` sadly)

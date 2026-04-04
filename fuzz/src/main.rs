@@ -167,8 +167,9 @@ macro_rules! float_reprs {
 
                 // FIXME: we are discarding status results here and not making use of rounding mode.
                 fn cxx_apf_eval_fuzz_op(op: FuzzOp<Self>) -> Self {
-                    extern "C" {
-                        fn $cxx_apf_eval_fuzz_op(
+                    // SAFETY: matches definition in `ap_fuzz.cpp`
+                    unsafe extern "C" {
+                        safe fn $cxx_apf_eval_fuzz_op(
                             opcode: u8,
                             round: u8,
                             ai: $repr,
@@ -192,11 +193,7 @@ macro_rules! float_reprs {
                     };
 
                     let mut out = 0;
-
-                    let _status = unsafe {
-                        $cxx_apf_eval_fuzz_op(op.tag(), 0, ai, bi, ci, &mut out)
-                    };
-
+                    let _status = $cxx_apf_eval_fuzz_op(op.tag(), 0, ai, bi, ci, &mut out);
                     Self(out)
                 }
 
@@ -885,6 +882,8 @@ fn main() {
     // of basic examples, e.g. every `FuzzOp` variant with `0.0` for all inputs
     // (and/or maybe testcases from known and/or fixed bugs, too).
     eprintln!(" - seed with `mkdir fuzz/in-foo && echo > fuzz/in-foo/empty`");
-    eprintln!(" - run with `cargo afl fuzz -i fuzz/in-foo -o fuzz/out-foo target/release/rustc_apfloat-fuzz`");
+    eprintln!(
+        " - run with `cargo afl fuzz -i fuzz/in-foo -o fuzz/out-foo target/release/rustc_apfloat-fuzz`"
+    );
     std::process::exit(1);
 }
