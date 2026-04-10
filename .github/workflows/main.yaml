@@ -26,7 +26,7 @@ jobs:
       run: rustup update nightly --no-self-update && rustup default nightly
     - uses: Swatinem/rust-cache@v2
     - name: Build and run tests
-      run: cargo test
+      run: cargo test --workspace
 
   msrv:
     name: Check the MSRV
@@ -46,7 +46,10 @@ jobs:
     - name: Install Rust
       run: rustup update "$MSRV" --no-self-update && rustup default "$MSRV"
     - uses: Swatinem/rust-cache@v2
-    - run: cargo build --package rustc_apfloat
+    - run: |
+        # strip the fuzz crate that uses a newer edition
+        sed '/members =/d' Cargo.toml
+        cargo build --package rustc_apfloat
 
   rustfmt:
     name: Rustfmt
