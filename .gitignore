@@ -2,6 +2,7 @@
 /Cargo.lock
 compile_commands.json
 .cache
+rustc-ice*
 
 # Fuzzing data/state.
 /fuzz/in*
