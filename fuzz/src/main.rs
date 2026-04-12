@@ -685,6 +685,10 @@ impl EvalCfg {
         // implementation is correct.
         if ret.kind == FpKind::F8E4M3FN {
             ret.ignore_cxx = Some("f8e4m3fn may be broken");
+            if op == Op::MulAdd {
+                // Don't even run for FMA which crashes in LLVM
+                ret.run_cxx = false;
+            }
         }
         if ret.kind == FpKind::F8E5M2 {
             ret.ignore_cxx = Some("f8e5m2 may be broken");
