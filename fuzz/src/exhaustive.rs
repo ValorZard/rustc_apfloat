@@ -12,7 +12,7 @@ use crate::Args;
 use crate::Commands;
 use crate::EvalCfg;
 use crate::FloatRepr;
-use crate::apf_fuzz::Op;
+use crate::Op;
 use crate::eval_all;
 use crate::for_each_repr;
 

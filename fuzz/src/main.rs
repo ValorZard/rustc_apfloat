@@ -3,7 +3,6 @@
 #![allow(internal_features)] // for the below config
 #![feature(cfg_target_has_reliable_f16_f128)]
 
-mod apf_fuzz;
 mod exhaustive;
 
 use io::IsTerminal;
@@ -13,12 +12,10 @@ use std::path::PathBuf;
 use std::{fmt, fs};
 
 use clap::{CommandFactory, Parser, Subcommand};
-use num_derive::FromPrimitive;
-use num_traits::FromPrimitive;
+use num_derive::{FromPrimitive, ToPrimitive};
+use num_traits::{FromPrimitive, ToPrimitive};
 use rustc_apfloat::ieee::{Double, Single};
 use rustc_apfloat::{Float, FloatConvert, Round, Status, StatusAnd, ieee};
-
-use crate::apf_fuzz::Op;
 
 #[derive(Clone, Parser, Debug)]
 struct Args {
@@ -244,7 +241,9 @@ macro_rules! float_reprs {
 
                     let rm = round_to_u8(rm);
                     let mut out = 0;
-                    let status = cxx::$cxx_apf_eval_fuzz_op(op.to_u8(), rm, a.0, b.0, c.0, &mut out);
+                    let status = cxx::$cxx_apf_eval_fuzz_op(
+                        op.to_u8().unwrap(), rm, a.0, b.0, c.0, &mut out,
+                    );
                     let status = cxx::decode_status(status);
 
                     status.and(Self(out))
@@ -365,6 +364,61 @@ impl FpKind {
     }
 }
 
+/// A testable operation, which can be encoded as a byte.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, FromPrimitive, ToPrimitive)]
+pub enum Op {
+    Neg = 0,
+    Add = 1,
+    Sub = 2,
+    Mul = 3,
+    Div = 4,
+    Rem = 5,
+    MulAdd = 6,
+    FToI128ToF = 7,
+    FToU128ToF = 8,
+    FToSingleToF = 9,
+    FToDoubleToF = 10,
+}
+
+impl Op {
+    pub const ALL: &[Self] = &[
+        Self::Neg,
+        Self::Add,
+        Self::Sub,
+        Self::Mul,
+        Self::Div,
+        Self::Rem,
+        Self::MulAdd,
+        Self::FToI128ToF,
+        Self::FToU128ToF,
+        Self::FToSingleToF,
+        Self::FToDoubleToF,
+    ];
+
+    pub fn airity(self) -> Arity {
+        match self {
+            Op::Neg => Arity::Unary,
+            Op::Add => Arity::Binary,
+            Op::Sub => Arity::Binary,
+            Op::Mul => Arity::Binary,
+            Op::Div => Arity::Binary,
+            Op::Rem => Arity::Binary,
+            Op::MulAdd => Arity::Ternary,
+            Op::FToI128ToF => Arity::Unary,
+            Op::FToU128ToF => Arity::Unary,
+            Op::FToSingleToF => Arity::Unary,
+            Op::FToDoubleToF => Arity::Unary,
+        }
+    }
+}
+
+/// Number of inputs to an operation.
+#[derive(Copy, Clone, Debug)]
+pub enum Arity {
+    Unary = 1,
+    Binary = 2,
+    Ternary = 3,
+}
 /// Errors from improperly formed inputs that cause an exit from the fuzzer but do not raise
 /// a test failing error.
 #[derive(Clone, Copy, Debug)]
@@ -1349,6 +1403,17 @@ mod tests {
             assert!(qnan_bit_mask.is_power_of_two());
         }
         assert_eq!(exp_mask | qnan_bit_mask, F::RustcApFloat::NAN.to_bits());
+    }
+
+    /* Check that `ALL` actually contains all variants. */
+
+    #[test]
+    fn op_all_list() {
+        let mut computed = (0u8..=u8::MAX).filter_map(Op::from_u8).collect::<Vec<_>>();
+        let mut listed = Op::ALL.to_vec();
+        computed.sort_unstable();
+        listed.sort_unstable();
+        assert_eq!(computed, listed);
     }
 
     #[test]
