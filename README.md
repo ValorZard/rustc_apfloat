@@ -99,13 +99,13 @@ mkdir fuzz/in-foo && echo > fuzz/in-foo/empty
 
 # Start the fuzzing run `foo`, which should bring up the AFL++ progress TUI
 # (see also `cargo run -p rustc_apfloat-fuzz` for extra flags available).
-cargo afl fuzz -i fuzz/in-foo -o fuzz/out-foo target/release/rustc_apfloat-fuzz
+cargo afl fuzz -i fuzz/run/in-foo -o fuzz/run/out-foo target/release/rustc_apfloat-fuzz
 ```
 
 To visualize the fuzzing testcases, you can use the `decode` subcommand:
 
 ```sh
-cargo run -p rustc_apfloat-fuzz decode fuzz/out-foo/default/crashes/*
+cargo run -p rustc_apfloat-fuzz decode fuzz/run/out-foo/default/crashes/*
 ```
 
 Note that `cargo run` and `cargo afl build` conflict, so if running the fuzzer

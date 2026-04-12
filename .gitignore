@@ -7,3 +7,4 @@ rustc-ice*
 # Fuzzing data/state.
 /fuzz/in*
 /fuzz/out*
+/fuzz/runs

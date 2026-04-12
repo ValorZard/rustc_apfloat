@@ -9,8 +9,8 @@ set -euxo pipefail
 # Detect cores
 all_cores="$(nproc)"
 used_cores="$((all_cores - 2))"
-in_dir="target/fuzz-in"
-sync_dir="target/fuzz-out"
+in_dir="fuzz/runs/fuzz-in"
+sync_dir="fuzz/runs/fuzz-out"
 tmux_window=afl
 
 if [[ "$used_cores" -lt 2 ]]; then
