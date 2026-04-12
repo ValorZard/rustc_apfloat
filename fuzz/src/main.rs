@@ -78,6 +78,62 @@ enum Commands {
     },
 }
 
+fn main() {
+    let cli_args = Args::parse();
+
+    if let Some(cmd) = &cli_args.command {
+        match cmd {
+            Commands::Check { file } => {
+                let mut buf = Vec::new();
+                let reader: &mut dyn Read = match file {
+                    Some(fname) if fname == "-" => &mut io::stdin(),
+                    Some(fname) => &mut fs::File::open(fname).unwrap(),
+                    None => &mut io::stdin(),
+                };
+                reader.read_to_end(&mut buf).unwrap();
+                match decode_eval_check(&buf, &cli_args, false) {
+                    Ok(()) => (),
+                    Err(Error::Decode(e)) => println!("error: {e} (no panic raised)"),
+                    Err(Error::Check(e)) => panic!("check error: {e}"),
+                }
+            }
+            Commands::Decode { files } => run_decode_subcmd(files, &cli_args),
+            Commands::Bruteforce { .. } => exhaustive::run_for_all_floats(&cli_args),
+        }
+        return;
+    }
+
+    // HACK(eddyb) `#[cfg(fuzzing)] {...}` used instead of `if cfg!(fuzzing) {...}`
+    // because the latter can still cause the `afl` crate to be linked, and it
+    // depends on native libraries that are only available under `cargo afl ...`.
+    #[cfg(fuzzing)]
+    if true {
+        // FIXME(eddyb) make the first argument (panic hook choice) a CLI toggle.
+        afl::fuzz(true, |buf| {
+            // Discard decoding errors
+            decode_eval_check(&buf, &cli_args, false).unwrap();
+        });
+
+        return;
+    }
+
+    // FIXME(eddyb) add better docs for all of this.
+    // FIXME(eddyb) add `seed` subcommand using `FuzzOp::encode_into`, and a set
+    // of basic examples, e.g. every `FuzzOp` variant with `0.0` for all inputs
+    // (and/or maybe testcases from known and/or fixed bugs, too).
+    Args::command().print_long_help().unwrap();
+    eprintln!(
+        "\n\
+        To fuzz `rustc_apfloat`, you must use `cargo afl`:\n\
+        - `cargo install afl`\n\
+        - build with `cargo afl build -p rustc_apfloat-fuzz --release`\n\
+        - seed with `mkdir fuzz/in-foo && echo > fuzz/in-foo/empty`\n\
+        - run with `cargo afl fuzz -i fuzz/in-foo -o fuzz/out-foo target/release/rustc_apfloat-fuzz`\n\
+        "
+    );
+    std::process::exit(1);
+}
+
 /// Trait implemented for types that describe a floating-point format supported
 /// by `rustc_apfloat`, but which themselves only carry the binary representation
 /// (instead of `rustc_apfloat` types or native/hardware floating-point types).
@@ -301,62 +357,6 @@ float_reprs! {
 }
 
 pub(crate) use for_each_repr;
-
-fn main() {
-    let cli_args = Args::parse();
-
-    if let Some(cmd) = &cli_args.command {
-        match cmd {
-            Commands::Check { file } => {
-                let mut buf = Vec::new();
-                let reader: &mut dyn Read = match file {
-                    Some(fname) if fname == "-" => &mut io::stdin(),
-                    Some(fname) => &mut fs::File::open(fname).unwrap(),
-                    None => &mut io::stdin(),
-                };
-                reader.read_to_end(&mut buf).unwrap();
-                match decode_eval_check(&buf, &cli_args, false) {
-                    Ok(()) => (),
-                    Err(Error::Decode(e)) => println!("error: {e} (no panic raised)"),
-                    Err(Error::Check(e)) => panic!("check error: {e}"),
-                }
-            }
-            Commands::Decode { files } => run_decode_subcmd(files, &cli_args),
-            Commands::Bruteforce { .. } => exhaustive::run_for_all_floats(&cli_args),
-        }
-        return;
-    }
-
-    // HACK(eddyb) `#[cfg(fuzzing)] {...}` used instead of `if cfg!(fuzzing) {...}`
-    // because the latter can still cause the `afl` crate to be linked, and it
-    // depends on native libraries that are only available under `cargo afl ...`.
-    #[cfg(fuzzing)]
-    if true {
-        // FIXME(eddyb) make the first argument (panic hook choice) a CLI toggle.
-        afl::fuzz(true, |buf| {
-            // Discard decoding errors
-            decode_eval_check(&buf, &cli_args, false).unwrap();
-        });
-
-        return;
-    }
-
-    // FIXME(eddyb) add better docs for all of this.
-    // FIXME(eddyb) add `seed` subcommand using `FuzzOp::encode_into`, and a set
-    // of basic examples, e.g. every `FuzzOp` variant with `0.0` for all inputs
-    // (and/or maybe testcases from known and/or fixed bugs, too).
-    Args::command().print_long_help().unwrap();
-    eprintln!(
-        "\n\
-        To fuzz `rustc_apfloat`, you must use `cargo afl`:\n\
-        - `cargo install afl`\n\
-        - build with `cargo afl build -p rustc_apfloat-fuzz --release`\n\
-        - seed with `mkdir fuzz/in-foo && echo > fuzz/in-foo/empty`\n\
-        - run with `cargo afl fuzz -i fuzz/in-foo -o fuzz/out-foo target/release/rustc_apfloat-fuzz`\n\
-        "
-    );
-    std::process::exit(1);
-}
 
 /// Errors from improperly formed inputs that cause an exit from the fuzzer but do not raise
 /// a test failing error.
