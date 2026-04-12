@@ -576,7 +576,8 @@ fn run_decode_subcmd(files: &[PathBuf], cli_args: &Args) {
         match decode_eval_check(&buf, cli_args, true) {
             Ok(()) => (),
             Err(Error::Decode(e)) => println!("error decoding file: {e}"),
-            Err(Error::Check(e)) => println!("check error: {e:?}"),
+            // No need to print anything extra, we already get the mismatch messages.
+            Err(Error::Check(_e)) => (),
         }
     }
 }

@@ -81,11 +81,21 @@ hardware floating-point behavior) is to employ *fuzzing*.
 The fuzzing infrastructure lives in `fuzz/` and requires `cargo-afl`, but also
 involves an automated build of the original C++ `llvm::APFloat` code with `clang`
 (to be able to instrument it via LLVM, in the same way `cargo-afl` does for the
-Rust code), and has been prototyped and tested on Linux (and is unlikely to work
-on other platforms, or even some Linux distros, though it mostly assumes UNIX).
+Rust code), and has been prototyped and tested on Linux. It is unlikely to work
+on other platforms, or even some Linux distros, though it mostly assumes UNIX.
 
-Example usage:
-<sub>(**TODO**: maybe move this to `fuzz/README.md` and/or expand on it)</sub>
+There is a justfile that makes this easy:
+
+```sh
+# Build and run fuzzing
+just fuzz
+# Do the same thing but use more cores
+just fuzz-parallel
+# Print crashes. Can be run while fuzzing is ongoing.
+just decode
+```
+
+Longer version:
 
 ```sh
 # Install `cargo-afl` (used below to build/run the fuzzing binary).
