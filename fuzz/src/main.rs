@@ -6,13 +6,17 @@
 mod apf_fuzz;
 mod exhaustive;
 
-use clap::{CommandFactory, Parser, Subcommand};
 use io::IsTerminal;
-use rustc_apfloat::ieee::{Double, Single};
-use rustc_apfloat::{Float, FloatConvert, Round, Status, StatusAnd, ieee};
-use std::io::{self, Read};
+use io::Read;
+use std::io;
 use std::path::PathBuf;
 use std::{fmt, fs};
+
+use clap::{CommandFactory, Parser, Subcommand};
+use num_derive::FromPrimitive;
+use num_traits::FromPrimitive;
+use rustc_apfloat::ieee::{Double, Single};
+use rustc_apfloat::{Float, FloatConvert, Round, Status, StatusAnd, ieee};
 
 use crate::apf_fuzz::Op;
 
@@ -185,7 +189,6 @@ trait FloatRepr: Copy + Default + Eq + fmt::Display + fmt::Debug {
 macro_rules! float_reprs {
     ($($name:ident($repr:ty) {
         type RustcApFloat = $rs_apf_ty:ty;
-        const REPR_TAG = $repr_tag:expr;
         extern fn = $cxx_apf_eval_fuzz_op:ident;
         $(type HardFloat = $hard_float_ty:ty;)?
     })+) => {
@@ -196,26 +199,6 @@ macro_rules! float_reprs {
                    $block
                 })+
             };
-        }
-
-        #[allow(non_camel_case_types)]
-        #[derive(Clone, Copy, Debug, PartialEq)]
-        enum FpKind {
-            $($name = $repr_tag,)+
-        }
-
-        impl FpKind {
-            fn from_u8(tag: u8) -> Option<Self> {
-                let v = match tag {
-                    $(x if x == Self::$name.to_u8() => Self::$name,)+
-                    _ => return None,
-                };
-                Some(v)
-            }
-
-            fn to_u8(self) -> u8 {
-                self as u8
-            }
         }
 
         $(
@@ -312,51 +295,75 @@ macro_rules! float_reprs {
 float_reprs! {
     Ieee16(u16) {
         type RustcApFloat = rustc_apfloat::ieee::Half;
-        const REPR_TAG = 16;
         extern fn = cxx_apf_eval_op_ieee16;
     }
     Ieee32(u32) {
         type RustcApFloat = rustc_apfloat::ieee::Single;
-        const REPR_TAG = 32;
         extern fn = cxx_apf_eval_op_ieee32;
         type HardFloat = f32;
     }
     Ieee64(u64) {
         type RustcApFloat = rustc_apfloat::ieee::Double;
-        const REPR_TAG = 64;
         extern fn = cxx_apf_eval_op_ieee64;
         type HardFloat = f64;
     }
     Ieee128(u128) {
         type RustcApFloat = rustc_apfloat::ieee::Quad;
-        const REPR_TAG = 128;
         extern fn = cxx_apf_eval_op_ieee128;
     }
 
     // Non-standard IEEE-like formats.
     F8E5M2(u8) {
         type RustcApFloat = rustc_apfloat::ieee::Float8E5M2;
-        const REPR_TAG = 8 + 0;
         extern fn = cxx_apf_eval_op_f8e5m2;
     }
     F8E4M3FN(u8) {
         type RustcApFloat = rustc_apfloat::ieee::Float8E4M3FN;
-        const REPR_TAG = 8 + 1;
         extern fn = cxx_apf_eval_op_f8e4m3fn;
     }
     BrainF16(u16) {
         type RustcApFloat = rustc_apfloat::ieee::BFloat;
-        const REPR_TAG = 16 + 1;
         extern fn = cxx_apf_eval_op_brainf16;
     }
     X87_F80(u128) {
         type RustcApFloat = rustc_apfloat::ieee::X87DoubleExtended;
-        const REPR_TAG = 80;
         extern fn = cxx_apf_eval_op_x87_f80;
     }
 }
 
 pub(crate) use for_each_repr;
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, FromPrimitive)]
+pub enum FpKind {
+    // The tag is based on the bit count. These are specified so corpus inputs are stable.
+    Ieee16 = 16,
+    Ieee32 = 32,
+    Ieee64 = 64,
+    Ieee128 = 128,
+    F8E5M2 = 8,
+    F8E4M3FN = 8 + 1,
+    BrainF16 = 16 + 1,
+    #[allow(non_camel_case_types)]
+    X87_F80 = 80,
+}
+
+impl FpKind {
+    #[cfg_attr(not(test), expect(unused))]
+    const ALL: &[Self] = &[
+        Self::Ieee16,
+        Self::Ieee32,
+        Self::Ieee64,
+        Self::Ieee128,
+        Self::F8E5M2,
+        Self::F8E4M3FN,
+        Self::BrainF16,
+        Self::X87_F80,
+    ];
+
+    pub fn to_u8(self) -> u8 {
+        self as u8
+    }
+}
 
 /// Errors from improperly formed inputs that cause an exit from the fuzzer but do not raise
 /// a test failing error.
@@ -1342,5 +1349,16 @@ mod tests {
             assert!(qnan_bit_mask.is_power_of_two());
         }
         assert_eq!(exp_mask | qnan_bit_mask, F::RustcApFloat::NAN.to_bits());
+    }
+
+    #[test]
+    fn fpkind_all_list() {
+        let mut computed = (0u8..=u8::MAX)
+            .filter_map(FpKind::from_u8)
+            .collect::<Vec<_>>();
+        let mut listed = FpKind::ALL.to_vec();
+        computed.sort_unstable();
+        listed.sort_unstable();
+        assert_eq!(computed, listed);
     }
 }
