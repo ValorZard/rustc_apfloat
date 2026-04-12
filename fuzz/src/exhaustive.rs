@@ -1,17 +1,21 @@
 use std::io::Write;
 use std::mem;
+use std::num::NonZero;
 use std::num::NonZeroUsize;
 
 use rustc_apfloat::FloatConvert;
+use rustc_apfloat::Round;
 use rustc_apfloat::ieee::Double;
 use rustc_apfloat::ieee::Single;
 
 use crate::Args;
 use crate::Commands;
+use crate::EvalCfg;
 use crate::FloatRepr;
-use crate::apf_fuzz::FuzzOp;
+use crate::apf_fuzz::Op;
+use crate::eval_all;
 
-pub fn run_exhaustive<F: FloatRepr>(cli_args: &Args) -> Result<(), std::num::NonZero<usize>>
+pub fn run_exhaustive<F: FloatRepr>(cli_args: &Args) -> Result<(), NonZero<usize>>
 where
     F: Send + 'static,
     Single: FloatConvert<F::RustcApFloat>,
@@ -38,21 +42,18 @@ where
         ..cli_args.clone()
     };
 
-    let all_ops = (0..)
-        .map(FuzzOp::from_tag)
-        .take_while(|op| op.is_some())
-        .map(|op| op.unwrap())
-        .filter(move |op| {
-            if only_non_trivial_fma {
-                matches!(op, FuzzOp::MulAdd(..))
-            } else {
-                true
-            }
-        });
+    let all_ops = if only_non_trivial_fma {
+        &[Op::MulAdd]
+    } else {
+        Op::ALL
+    };
 
-    let op_to_combined_input_bits_range = move |op: FuzzOp<()>| {
-        let mut total_bit_width = 0;
-        op.map(|()| total_bit_width += F::BIT_WIDTH);
+    // This currently only tests round to nearest.
+    let make_cfg =
+        |op: Op, cli_args: &Args| EvalCfg::new(F::KIND, op, Round::NearestTiesToEven, cli_args);
+
+    let op_to_combined_input_bits_range = move |op: Op| {
+        let total_bit_width = F::BIT_WIDTH * (op.airity() as usize);
 
         // HACK(eddyb) the highest `F::BIT_WIDTH` bits are the last input,
         // i.e. the addend for FMA (see also `Commands::Bruteforce` docs).
@@ -62,29 +63,30 @@ where
             0
         };
 
-        start_combined_input_bits..u128::checked_shl(1, total_bit_width as u32).unwrap()
+        start_combined_input_bits..1_u128.strict_shl(total_bit_width as u32)
     };
-    let op_to_exhaustive_cases = move |op: FuzzOp<()>| {
-        op_to_combined_input_bits_range(op).map(move |i| -> FuzzOp<F> {
-            let mut combined_input_bits = i;
-            let op_with_inputs = op.map(|()| {
-                let x = combined_input_bits & ((1 << F::BIT_WIDTH) - 1);
-                combined_input_bits >>= F::BIT_WIDTH;
-                F::from_bits_u128(x)
-            });
-            assert_eq!(combined_input_bits, 0);
-            op_with_inputs
+    let op_to_exhaustive_cases = move |op: Op| {
+        op_to_combined_input_bits_range(op).map(move |i| -> (F, F, F) {
+            let mask = (1 << F::BIT_WIDTH) - 1;
+            let a = (i >> (0 * F::BIT_WIDTH)) & mask;
+            let b = (i >> (1 * F::BIT_WIDTH)) & mask;
+            let c = (i >> (2 * F::BIT_WIDTH)) & mask;
+            assert_eq!(i >> (3 * F::BIT_WIDTH), 0);
+            (
+                F::from_bits_u128(a),
+                F::from_bits_u128(b),
+                F::from_bits_u128(c),
+            )
         })
     };
 
     let num_total_cases = all_ops
-        .clone()
+        .iter()
         .map(|op| {
-            let range = op_to_combined_input_bits_range(op);
-            range.end.checked_sub(range.start).unwrap()
+            let range = op_to_combined_input_bits_range(*op);
+            range.end.strict_sub(range.start)
         })
-        .try_fold(0, u128::checked_add)
-        .unwrap();
+        .fold(0, u128::strict_add);
 
     let float_name = F::short_lowercase_name();
     println!("Exhaustively checking {num_total_cases} cases for {float_name}:");
@@ -124,28 +126,29 @@ where
             let cli_args = cli_args.clone();
             let updates_tx = updates_tx.clone();
             let cases_per_thread = all_ops
-                .clone()
-                .flat_map(op_to_exhaustive_cases)
+                .iter()
+                .flat_map(move |op| op_to_exhaustive_cases(*op).map(|(a, b, c)| (*op, a, b, c)))
                 .skip(thread_idx)
                 .step_by(num_threads.get());
+
             std::thread::spawn(move || {
                 let mut update = Update::default();
-                for op_with_inputs in cases_per_thread {
-                    // HACK(eddyb) there are still panics we need to account for,
-                    // e.g. https://github.com/llvm/llvm-project/issues/63895, and
-                    // even if the Rust code didn't panic, LLVM asserts would trip.
-                    match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                        op_with_inputs.eval(&cli_args)
-                    })) {
+
+                for (op, a, b, c) in cases_per_thread {
+                    let cfg = make_cfg(op, &cli_args);
+                    let res = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                        eval_all(&cfg, a, b, c)
+                    }));
+                    match res {
                         Ok(out) => {
-                            if out.all_match() {
+                            if out.check_all(&cfg, a, b, c, false).is_ok() {
                                 update.successes += 1;
                             } else {
-                                update.mismatch_or_panic = Some((op_with_inputs, None));
+                                update.mismatch_or_panic = Some(((op, a, b, c), None));
                             }
                         }
                         Err(panic) => {
-                            update.mismatch_or_panic = Some((op_with_inputs, Some(panic)));
+                            update.mismatch_or_panic = Some(((op, a, b, c), Some(panic)));
                         }
                     }
 
@@ -189,7 +192,9 @@ where
 
                 Err((op_with_inputs, None)) => {
                     if verbose {
-                        op_with_inputs.print_op_and_eval_outputs(cli_args);
+                        let (op, a, b, c) = op_with_inputs;
+                        let cfg = make_cfg(op, &cli_args);
+                        let _ = eval_all(&cfg, a, b, c).check_all(&cfg, a, b, c, true);
                     }
 
                     last_mismatch_case_idx = Some(case_idx);
@@ -200,7 +205,10 @@ where
 
                 Err((op_with_inputs, Some(panic))) => {
                     if verbose {
-                        op_with_inputs.print_op_and_eval_outputs(&cli_args_plus_ignore_cxx);
+                        let (op, a, b, c) = op_with_inputs;
+                        let cfg = make_cfg(op, &cli_args_plus_ignore_cxx);
+                        let _ = eval_all(&cfg, a, b, c).check_all(&cfg, a, b, c, true);
+
                         if let Ok(msg) = panic.downcast::<String>() {
                             eprintln!("panicked with: {msg}");
                         } else {
@@ -261,7 +269,7 @@ where
     // FIXME(eddyb) consider sorting these (and panics?) due to parallelism.
     let num_mismatches = all_mismatches.len();
     let mut select_mismatches = all_mismatches;
-    select_mismatches.dedup_by_key(|op_with_inputs| op_with_inputs.tag());
+    select_mismatches.dedup_by_key(|(op, _, _, _)| *op);
 
     if num_mismatches > 0 {
         println!();
@@ -271,7 +279,9 @@ where
             select_mismatches.len(),
         );
         for mismatch in select_mismatches {
-            mismatch.print_op_and_eval_outputs(cli_args);
+            let (op, a, b, c) = mismatch;
+            let cfg = make_cfg(op, &cli_args);
+            let _ = eval_all(&cfg, a, b, c).check_all(&cfg, a, b, c, true);
         }
     }
 
@@ -288,7 +298,9 @@ where
         );
         if !verbose || verbose_failed_to_show_some_panics {
             for &panicking_case in &all_panics {
-                panicking_case.print_op_and_eval_outputs(&cli_args_plus_ignore_cxx);
+                let (op, a, b, c) = panicking_case;
+                let cfg = make_cfg(op, &cli_args_plus_ignore_cxx);
+                let _ = eval_all(&cfg, a, b, c).check_all(&cfg, a, b, c, true);
             }
         }
     }

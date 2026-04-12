@@ -6,13 +6,11 @@
 mod apf_fuzz;
 mod exhaustive;
 
-use apf_fuzz::FuzzOp;
 use clap::{CommandFactory, Parser, Subcommand};
 use io::IsTerminal;
 use rustc_apfloat::ieee::{Double, Single};
 use rustc_apfloat::{Float, FloatConvert, Round, Status, StatusAnd, ieee};
 use std::io::{self, Read};
-use std::num::NonZeroUsize;
 use std::path::PathBuf;
 use std::{fmt, fs};
 
@@ -103,7 +101,6 @@ trait FloatRepr: Copy + Default + Eq + fmt::Display + fmt::Debug {
 
     const NAME: &'static str;
 
-    #[cfg_attr(not(test), expect(dead_code))]
     const KIND: FpKind;
 
     // HACK(eddyb) this has to be overwritable because we have more than one
@@ -119,17 +116,12 @@ trait FloatRepr: Copy + Default + Eq + fmt::Display + fmt::Debug {
 
     // FIXME(const) `[u8; Self::BYTE_LEN]` would be better but requires MGCA.
     fn from_le_bytes(bytes: &[u8]) -> Self;
-    fn write_as_le_bytes_into(self, out_bytes: &mut Vec<u8>);
 
     fn to_bits_u128(self) -> u128;
     fn from_bits_u128(bits: u128) -> Self;
 
-    // HACK(eddyb) this avoids needing another trait (or an `enum` of all formats).
-    fn cxx_apf_eval_fuzz_op(op: FuzzOp<Self>) -> Self;
-    fn cxx_apf_eval_fuzz_op2(op: Op, rm: Round, a: Self, b: Self, c: Self) -> StatusAnd<Self>;
-    // HACK(eddyb) this avoids dealing with separate traits and other complications.
-    fn hard_eval_fuzz_op_if_supported(op: FuzzOp<Self>) -> Option<Self>;
-    fn host_eval_fuzz_op_if_supported2(
+    fn cxx_apf_eval_fuzz_op(op: Op, rm: Round, a: Self, b: Self, c: Self) -> StatusAnd<Self>;
+    fn host_eval_fuzz_op_if_supported(
         op: Op,
         rm: Round,
         a: Self,
@@ -211,9 +203,6 @@ macro_rules! float_reprs {
                     );
                     Self(<$repr>::from_le_bytes(repr_bytes))
                 }
-                fn write_as_le_bytes_into(self, out_bytes: &mut Vec<u8>) {
-                    out_bytes.extend(&self.0.to_le_bytes()[..Self::BYTE_LEN]);
-                }
 
                 fn to_bits_u128(self) -> u128 {
                     self.0.into()
@@ -222,28 +211,7 @@ macro_rules! float_reprs {
                     Self(bits.try_into().unwrap())
                 }
 
-                // FIXME: we are discarding status results here and not making use of rounding mode.
-                fn cxx_apf_eval_fuzz_op(op: FuzzOp<Self>) -> Self {
-                    let (ai, bi, ci)= match op {
-                        FuzzOp::Neg(a) => (a.0, 0, 0),
-                        FuzzOp::Add(a, b) => (a.0, b.0, 0),
-                        FuzzOp::Sub(a, b) => (a.0, b.0, 0),
-                        FuzzOp::Mul(a, b) => (a.0, b.0, 0),
-                        FuzzOp::Div(a, b) => (a.0, b.0, 0),
-                        FuzzOp::Rem(a, b) => (a.0, b.0, 0),
-                        FuzzOp::MulAdd(a, b, c) => (a.0, b.0, c.0),
-                        FuzzOp::FToI128ToF(a) => (a.0, 0, 0),
-                        FuzzOp::FToU128ToF(a) => (a.0, 0, 0),
-                        FuzzOp::FToSingleToF(a) => (a.0, 0, 0),
-                        FuzzOp::FToDoubleToF(a) => (a.0, 0, 0),
-                    };
-
-                    let mut out = 0;
-                    let _status = cxx::$cxx_apf_eval_fuzz_op(op.tag(), 0, ai, bi, ci, &mut out);
-                    Self(out)
-                }
-
-                fn cxx_apf_eval_fuzz_op2(
+                fn cxx_apf_eval_fuzz_op(
                     op: Op, rm: Round, a: Self, b: Self, c: Self
                 ) -> StatusAnd<Self>
                 {
@@ -256,14 +224,8 @@ macro_rules! float_reprs {
                     status.and(Self(out))
                 }
 
-                fn hard_eval_fuzz_op_if_supported(_op: FuzzOp<Self>) -> Option<Self> {
-                    None $(.or(Some(
-                        Self(_op.map(|Self(x)| <$hard_float_ty>::from_bits(x)).eval_hard().to_bits())
-                    )))?
-                }
-
                 #[allow(unused_variables)]
-                fn host_eval_fuzz_op_if_supported2(
+                fn host_eval_fuzz_op_if_supported(
                     op: Op, rm: Round, a: Self, b: Self, c: Self
                 ) -> Option<StatusAnd<Self>> {
                     None $(.or(
@@ -351,205 +313,6 @@ float_reprs! {
     }
 }
 
-struct FuzzOpEvalOutputs<F: FloatRepr> {
-    rs_apf: F,
-    cxx_apf: Option<F>,
-    hard: Option<F>,
-}
-
-impl<F: FloatRepr> FuzzOpEvalOutputs<F> {
-    fn all_match(self) -> bool {
-        [self.cxx_apf, self.hard]
-            .into_iter()
-            .flatten()
-            .all(|x| x == self.rs_apf)
-    }
-}
-
-impl<F: FloatRepr> FuzzOp<F>
-// FIXME(eddyb) such bounds shouldn't be here, but `FloatRepr` can't imply them.
-where
-    ieee::Single: FloatConvert<F::RustcApFloat>,
-    ieee::Double: FloatConvert<F::RustcApFloat>,
-{
-    // FIXME(eddyb) add `seed` subcommand using this method, and a set
-    // of basic examples, e.g. every `FuzzOp` variant with `0.0` for all inputs
-    // (and/or maybe testcases from known and/or fixed bugs, too).
-    #[allow(unused)]
-    fn encode_into(self, out_bytes: &mut Vec<u8>) {
-        out_bytes.push(self.tag());
-        self.map(|x| x.write_as_le_bytes_into(out_bytes));
-    }
-
-    fn eval(self, cli_args: &Args) -> FuzzOpEvalOutputs<F> {
-        let mut out = FuzzOpEvalOutputs {
-            rs_apf: F::from_bits_u128(
-                self.map(F::to_bits_u128)
-                    .map(F::RustcApFloat::from_bits)
-                    .eval_rs_apf()
-                    .to_bits(),
-            ),
-            cxx_apf: if !cli_args.ignore_cxx {
-                Some(F::cxx_apf_eval_fuzz_op(self))
-            } else {
-                None
-            },
-            hard: if !cli_args.ignore_hard {
-                F::hard_eval_fuzz_op_if_supported(self)
-            } else {
-                None
-            },
-        };
-
-        out.hard = out.hard.map(|out_hard| {
-            let mut out_hard_bits = out_hard.to_bits_u128();
-
-            // HACK(eddyb) to avoid putting this behind a `HasHardFloat` bound,
-            // we hardcode some aspects of the IEEE binary float representation,
-            // relying on `rustc_apfloat`-provided constants as a source of truth.
-            let sign_bit_mask = 1 << (F::BIT_WIDTH - 1);
-            let exp_mask = F::RustcApFloat::INFINITY.to_bits();
-            let sig_mask = (1 << exp_mask.trailing_zeros()) - 1;
-            assert_eq!(
-                sign_bit_mask | exp_mask | sig_mask,
-                !0 >> (128 - F::BIT_WIDTH)
-            );
-            assert!((sig_mask + 1).is_power_of_two());
-            assert!(((exp_mask | sig_mask) + 1).is_power_of_two());
-            assert_eq!(
-                sign_bit_mask.count_ones() + exp_mask.count_ones() + sig_mask.count_ones(),
-                F::BIT_WIDTH as u32
-            );
-            let qnan_bit_mask = (sig_mask + 1) >> 1;
-            assert!(qnan_bit_mask.is_power_of_two());
-            assert_eq!(exp_mask | qnan_bit_mask, F::RustcApFloat::NAN.to_bits());
-
-            let is_nan = |bits| {
-                let is_nan = (bits & exp_mask) == exp_mask && (bits & sig_mask) != 0;
-                assert_eq!(F::RustcApFloat::from_bits(bits).is_nan(), is_nan);
-                is_nan
-            };
-
-            // Allow using CLI flags to toggle whether differences vs hardware are
-            // erased (by copying e.g. signs from the `rustc_apfloat` result) or kept.
-            // FIXME(eddyb) figure out how much we can really validate against hardware.
-            let mut strict_nan_bits_mask = !0;
-            if !cli_args.strict_hard_nan_sign {
-                strict_nan_bits_mask &= !sign_bit_mask;
-            };
-
-            let rs_apf_bits = out.rs_apf.to_bits_u128();
-            if is_nan(out_hard_bits) && is_nan(rs_apf_bits) {
-                out_hard_bits &= strict_nan_bits_mask;
-                out_hard_bits |= rs_apf_bits & !strict_nan_bits_mask;
-
-                // There is still a NaN payload difference, check if they both
-                // are propagated inputs (verbatim or at most "quieted" if SNaN),
-                // because in some cases with multiple NaN inputs, something
-                // (hardware or even e.g. LLVM passes or instruction selection)
-                // along the way from Rust code to final results, can end up
-                // causing a different input NaN to get propagated to the result.
-                if !cli_args.strict_hard_nan_input_choice && out_hard_bits != rs_apf_bits {
-                    let out_nan_is_propagated_input = |out_nan_bits| {
-                        assert!(is_nan(out_nan_bits));
-                        let mut found_any_matching_inputs = false;
-                        self.map(F::to_bits_u128).map(|in_bits| {
-                            // NOTE(eddyb) this `is_nan` check is important, as
-                            // `INFINITY.to_bits() | qnan_bit_mask == NAN.to_bits()`,
-                            // i.e. seeting the QNaN is more than enough to turn
-                            // a non-NaN (infinities, specifically) into a NaN.
-                            if is_nan(in_bits) {
-                                // Make sure to "quiet" (i.e. turn SNaN into QNaN)
-                                // the input first, as propagation does (in the
-                                // default exception handling mode, at least).
-                                if (in_bits | qnan_bit_mask) & strict_nan_bits_mask
-                                    == out_nan_bits & strict_nan_bits_mask
-                                {
-                                    found_any_matching_inputs = true;
-                                }
-                            }
-                        });
-                        found_any_matching_inputs
-                    };
-                    if out_nan_is_propagated_input(out_hard_bits)
-                        && out_nan_is_propagated_input(rs_apf_bits)
-                    {
-                        out_hard_bits = rs_apf_bits;
-                    }
-                }
-
-                // HACK(eddyb) last chance to hide a NaN payload difference,
-                // in this case for FMAs of the form `a * b + NaN`, when `a * b`
-                // generates a new NaN (which hardware can ignore in favor of the
-                // existing NaN, but APFloat returns the fresh new NaN instead).
-                if cli_args.ignore_fma_nan_generate_vs_propagate && out_hard_bits != rs_apf_bits {
-                    if let FuzzOp::MulAdd(a, b, c) = self.map(F::to_bits_u128) {
-                        if !is_nan(a)
-                            && !is_nan(b)
-                            && is_nan(c)
-                            && out_hard_bits & strict_nan_bits_mask
-                                == (c | qnan_bit_mask) & strict_nan_bits_mask
-                            && rs_apf_bits == F::RustcApFloat::NAN.to_bits()
-                        {
-                            out_hard_bits = rs_apf_bits;
-                        }
-                    }
-                }
-            }
-
-            F::from_bits_u128(out_hard_bits)
-        });
-
-        out
-    }
-
-    fn print_op_and_eval_outputs(self, cli_args: &Args) {
-        println!(
-            "  {}.{:?}",
-            F::short_lowercase_name(),
-            self.map(FloatPrintHelper)
-        );
-
-        // HACK(eddyb) this lets us show all files even if some cause panics.
-        let FuzzOpEvalOutputs {
-            rs_apf,
-            cxx_apf,
-            hard,
-        } = match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| self.eval(cli_args))) {
-            Ok(out) => out,
-            Err(_) => {
-                // HACK(eddyb) this tries to reproduce assertion failures in C++.
-                if !cli_args.ignore_cxx {
-                    F::cxx_apf_eval_fuzz_op(self);
-                }
-                return;
-            }
-        };
-        let print = |x, label| {
-            print!("   => {:?} ({label})", FloatPrintHelper(x));
-            if x != rs_apf {
-                print!(" <- {}!!! MISMATCH !!!{}", term().red_b, term().rst)
-            }
-            println!();
-        };
-        print(rs_apf, "Rust / rustc_apfloat");
-        cxx_apf.map(|x| print(x, "C++ / llvm::APFloat"));
-        hard.map(|x| print(x, "native hardware floats"));
-    }
-
-    /// [`Commands::Bruteforce`] implementation (for a specific choice of `F`),
-    /// returning `Err(mismatch_count)` if there were any mismatches.
-    //
-    // HACK(eddyb) this is a method here because of the bounds `eval` needs, which
-    // are thankfully on the whole `impl`, so `Self::eval` is callable.
-    fn bruteforce(cli_args: &Args) -> Result<(), NonZeroUsize>
-    where
-        F: Send + 'static,
-    {
-        exhaustive::run_exhaustive::<F>(cli_args)
-    }
-}
-
 fn main() {
     let cli_args = Args::parse();
 
@@ -575,7 +338,7 @@ fn main() {
                 for repr_tag in 0..=u8::MAX {
                     dispatch_any_float_repr_by_repr_tag!(match repr_tag {
                         for<F: FloatRepr> => {
-                            any_mismatches |= FuzzOp::<F>::bruteforce(&cli_args).is_err();
+                            any_mismatches |= exhaustive::run_exhaustive::<F>(&cli_args).is_err();
                         }
                     });
                 }
@@ -820,7 +583,7 @@ fn decode_eval_check(data: &[u8], cli_args: &Args, always_print: bool) -> Result
 fn decode_for_ty_eval<F: FloatRepr>(
     cfg: &EvalCfg,
     data: &[u8],
-) -> Result<(F, F, F, FuzzOpEvalOutputs2<F>), DecodeError>
+) -> Result<(F, F, F, FuzzOpEvalOutputs<F>), DecodeError>
 where
     Single: FloatConvert<<F as FloatRepr>::RustcApFloat>,
     Double: FloatConvert<<F as FloatRepr>::RustcApFloat>,
@@ -831,20 +594,20 @@ where
 }
 
 #[must_use]
-fn eval_all<F: FloatRepr>(cfg: &EvalCfg, a: F, b: F, c: F) -> FuzzOpEvalOutputs2<F>
+fn eval_all<F: FloatRepr>(cfg: &EvalCfg, a: F, b: F, c: F) -> FuzzOpEvalOutputs<F>
 where
     Single: FloatConvert<<F as FloatRepr>::RustcApFloat>,
     Double: FloatConvert<<F as FloatRepr>::RustcApFloat>,
 {
     // Evaluate the APFloat version as well as all possible references.
-    FuzzOpEvalOutputs2 {
+    FuzzOpEvalOutputs {
         rs_apf: eval_rust_ap(cfg.op, cfg.rm, a, b, c),
         cxx_apf: cfg
             .run_cxx
-            .then(|| F::cxx_apf_eval_fuzz_op2(cfg.op, cfg.rm, a, b, c)),
+            .then(|| F::cxx_apf_eval_fuzz_op(cfg.op, cfg.rm, a, b, c)),
         host: cfg
             .run_host
-            .then(|| F::host_eval_fuzz_op_if_supported2(cfg.op, cfg.rm, a, b, c))
+            .then(|| F::host_eval_fuzz_op_if_supported(cfg.op, cfg.rm, a, b, c))
             .flatten(),
     }
 }
@@ -874,7 +637,7 @@ fn decode_operands<F: FloatRepr>(op: Op, data: &[u8]) -> Result<(F, F, F), Decod
 }
 
 /// Collected outputs from all input sources.
-struct FuzzOpEvalOutputs2<F> {
+struct FuzzOpEvalOutputs<F> {
     rs_apf: StatusAnd<F>,
     cxx_apf: Option<StatusAnd<F>>,
     host: Option<StatusAnd<F>>,
@@ -892,7 +655,7 @@ struct ResultSummary {
     host_stat_ignore: Option<&'static str>,
 }
 
-impl<F: FloatRepr> FuzzOpEvalOutputs2<F> {
+impl<F: FloatRepr> FuzzOpEvalOutputs<F> {
     /// Validate that outputs are correct. Pass `always_print` for decoding use where we want to
     /// see the output regardless of whether or not it is a failure.
     fn check_all(
