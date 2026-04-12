@@ -563,9 +563,10 @@ fn main() {
                     None => &mut io::stdin(),
                 };
                 reader.read_to_end(&mut buf).unwrap();
-                match decode_eval_check(&buf, &cli_args, Mode::Assert) {
+                match decode_eval_check(&buf, &cli_args, false) {
                     Ok(()) => (),
-                    Err(e) => println!("error: {e} (no panic raised)"),
+                    Err(Error::Decode(e)) => println!("error: {e} (no panic raised)"),
+                    Err(Error::Check(e)) => panic!("check error: {e}"),
                 }
             }
             Commands::Decode { files } => run_decode_subcmd(files, &cli_args),
@@ -595,7 +596,7 @@ fn main() {
         // FIXME(eddyb) make the first argument (panic hook choice) a CLI toggle.
         afl::fuzz(true, |buf| {
             // Discard decoding errors
-            let _ = decode_eval_check(&buf, &cli_args, Mode::Assert);
+            decode_eval_check(&buf, &cli_args, false).unwrap();
         });
 
         return;
@@ -646,8 +647,36 @@ impl fmt::Display for DecodeError {
     }
 }
 
+/// Context for when a check fails.
+#[derive(Clone, Debug)]
+struct CheckError(Box<(EvalCfg, ResultSummary)>);
+
+impl fmt::Display for CheckError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "cfg {:?} results {:?}", self.0.0, self.0.1)
+    }
+}
+
+#[derive(Clone, Debug)]
+enum Error {
+    Decode(DecodeError),
+    Check(CheckError),
+}
+
+impl From<DecodeError> for Error {
+    fn from(value: DecodeError) -> Self {
+        Self::Decode(value)
+    }
+}
+
+impl From<CheckError> for Error {
+    fn from(value: CheckError) -> Self {
+        Self::Check(value)
+    }
+}
+
 /// Configuration for the current operation.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 struct EvalCfg {
     kind: FpKind,
     op: Op,
@@ -727,14 +756,6 @@ impl EvalCfg {
     }
 }
 
-#[derive(Clone, Copy, Debug)]
-enum Mode {
-    /// Print the results of checking but don't panic. Used for decoding error results.
-    PrintOnly,
-    /// Exit on failure, used when actually running the fuzzer.
-    Assert,
-}
-
 /// Decode and evaluate all passed files without exiting on mismatches.
 fn run_decode_subcmd(files: &[PathBuf], cli_args: &Args) {
     let mut buf = Vec::new();
@@ -745,49 +766,50 @@ fn run_decode_subcmd(files: &[PathBuf], cli_args: &Args) {
         let mut f = fs::File::open(path).unwrap();
         f.read_to_end(&mut buf).unwrap();
 
-        match decode_eval_check(&buf, cli_args, Mode::PrintOnly) {
+        match decode_eval_check(&buf, cli_args, true) {
             Ok(()) => (),
-            Err(e) => println!("error decoding file: {e}"),
+            Err(Error::Decode(e)) => println!("error decoding file: {e}"),
+            Err(Error::Check(e)) => println!("check error: {e:?}"),
         }
     }
 }
 
 /// Main runner: decode a config, inputs based on that config, and then evaluate the results
 /// for Rust, LLVM APFloat, and the host.
-fn decode_eval_check(data: &[u8], cli_args: &Args, mode: Mode) -> Result<(), DecodeError> {
+fn decode_eval_check(data: &[u8], cli_args: &Args, always_print: bool) -> Result<(), Error> {
     let (cfg, data) = EvalCfg::decode(data, cli_args)?;
     match cfg.kind {
         FpKind::Ieee16 => {
             let (a, b, c, r) = decode_for_ty_eval::<Ieee16>(&cfg, data)?;
-            r.check_all(&cfg, a, b, c, mode);
+            r.check_all(&cfg, a, b, c, always_print)?;
         }
         FpKind::Ieee32 => {
             let (a, b, c, r) = decode_for_ty_eval::<Ieee32>(&cfg, data)?;
-            r.check_all(&cfg, a, b, c, mode);
+            r.check_all(&cfg, a, b, c, always_print)?;
         }
         FpKind::Ieee64 => {
             let (a, b, c, r) = decode_for_ty_eval::<Ieee64>(&cfg, data)?;
-            r.check_all(&cfg, a, b, c, mode);
+            r.check_all(&cfg, a, b, c, always_print)?;
         }
         FpKind::Ieee128 => {
             let (a, b, c, r) = decode_for_ty_eval::<Ieee128>(&cfg, data)?;
-            r.check_all(&cfg, a, b, c, mode);
+            r.check_all(&cfg, a, b, c, always_print)?;
         }
         FpKind::F8E5M2 => {
             let (a, b, c, r) = decode_for_ty_eval::<F8E5M2>(&cfg, data)?;
-            r.check_all(&cfg, a, b, c, mode);
+            r.check_all(&cfg, a, b, c, always_print)?;
         }
         FpKind::F8E4M3FN => {
             let (a, b, c, r) = decode_for_ty_eval::<F8E4M3FN>(&cfg, data)?;
-            r.check_all(&cfg, a, b, c, mode);
+            r.check_all(&cfg, a, b, c, always_print)?;
         }
         FpKind::BrainF16 => {
             let (a, b, c, r) = decode_for_ty_eval::<BrainF16>(&cfg, data)?;
-            r.check_all(&cfg, a, b, c, mode);
+            r.check_all(&cfg, a, b, c, always_print)?;
         }
         FpKind::X87_F80 => {
             let (a, b, c, r) = decode_for_ty_eval::<X87_F80>(&cfg, data)?;
-            r.check_all(&cfg, a, b, c, mode);
+            r.check_all(&cfg, a, b, c, always_print)?;
         }
     }
 
@@ -804,9 +826,18 @@ where
     Double: FloatConvert<<F as FloatRepr>::RustcApFloat>,
 {
     let (a, b, c) = decode_operands::<F>(cfg.op, data)?;
+    let r = eval_all(cfg, a, b, c);
+    Ok((a, b, c, r))
+}
 
+#[must_use]
+fn eval_all<F: FloatRepr>(cfg: &EvalCfg, a: F, b: F, c: F) -> FuzzOpEvalOutputs2<F>
+where
+    Single: FloatConvert<<F as FloatRepr>::RustcApFloat>,
+    Double: FloatConvert<<F as FloatRepr>::RustcApFloat>,
+{
     // Evaluate the APFloat version as well as all possible references.
-    let r = FuzzOpEvalOutputs2 {
+    FuzzOpEvalOutputs2 {
         rs_apf: eval_rust_ap(cfg.op, cfg.rm, a, b, c),
         cxx_apf: cfg
             .run_cxx
@@ -815,9 +846,7 @@ where
             .run_host
             .then(|| F::host_eval_fuzz_op_if_supported2(cfg.op, cfg.rm, a, b, c))
             .flatten(),
-    };
-
-    Ok((a, b, c, r))
+    }
 }
 
 /// Given a N-arity opcode, decode N `F`s from `data` and return zero in any remaining
@@ -851,15 +880,29 @@ struct FuzzOpEvalOutputs2<F> {
     host: Option<StatusAnd<F>>,
 }
 
-impl<F: FloatRepr> FuzzOpEvalOutputs2<F> {
-    /// Validate that outputs are correct. May unconitionally print all values or exit on error
-    /// base on the mode (mismatches always print).
-    fn check_all(&self, cfg: &EvalCfg, a: F, b: F, c: F, mode: Mode) {
-        let (always_print, always_assert) = match mode {
-            Mode::PrintOnly => (true, false),
-            Mode::Assert => (false, true),
-        };
+#[derive(Clone, Debug)]
+struct ResultSummary {
+    cxx_error: bool,
+    cxx_ignore: Option<&'static str>,
+    cxx_stat_error: bool,
+    cxx_stat_ignore: Option<&'static str>,
+    host_error: bool,
+    host_ignore: Option<&'static str>,
+    host_stat_error: bool,
+    host_stat_ignore: Option<&'static str>,
+}
 
+impl<F: FloatRepr> FuzzOpEvalOutputs2<F> {
+    /// Validate that outputs are correct. Pass `always_print` for decoding use where we want to
+    /// see the output regardless of whether or not it is a failure.
+    fn check_all(
+        &self,
+        cfg: &EvalCfg,
+        a: F,
+        b: F,
+        c: F,
+        always_print: bool,
+    ) -> Result<(), CheckError> {
         let print_float = |x: StatusAnd<F>,
                            label,
                            error,
@@ -898,19 +941,7 @@ impl<F: FloatRepr> FuzzOpEvalOutputs2<F> {
             println!();
         };
 
-        #[derive(Debug)]
-        struct Results {
-            cxx_error: bool,
-            cxx_ignore: Option<&'static str>,
-            cxx_stat_error: bool,
-            cxx_stat_ignore: Option<&'static str>,
-            host_error: bool,
-            host_ignore: Option<&'static str>,
-            host_stat_error: bool,
-            host_stat_ignore: Option<&'static str>,
-        }
-
-        let mut res = Results {
+        let mut res = ResultSummary {
             cxx_error: false,
             cxx_ignore: cfg.ignore_cxx,
             cxx_stat_error: false,
@@ -985,8 +1016,10 @@ impl<F: FloatRepr> FuzzOpEvalOutputs2<F> {
             }
         }
 
-        if always_assert && failure {
-            panic!("mismatched results: {cfg:#?}\n{res:#?}");
+        if failure {
+            Err(CheckError(Box::new((cfg.clone(), res))))
+        } else {
+            Ok(())
         }
     }
 }
