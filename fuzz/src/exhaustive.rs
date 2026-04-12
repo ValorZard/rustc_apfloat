@@ -14,6 +14,18 @@ use crate::EvalCfg;
 use crate::FloatRepr;
 use crate::apf_fuzz::Op;
 use crate::eval_all;
+use crate::for_each_repr;
+
+pub fn run_for_all_floats(cli_args: &Args) {
+    let mut any_mismatches = false;
+    for_each_repr!(for F in all_floats!() {
+        any_mismatches |= run_exhaustive::<F>(&cli_args).is_err();
+    });
+
+    if any_mismatches {
+        std::process::exit(1);
+    }
+}
 
 pub fn run_exhaustive<F: FloatRepr>(cli_args: &Args) -> Result<(), NonZero<usize>>
 where

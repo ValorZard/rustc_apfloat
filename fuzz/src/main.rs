@@ -103,10 +103,6 @@ trait FloatRepr: Copy + Default + Eq + fmt::Display + fmt::Debug {
 
     const KIND: FpKind;
 
-    // HACK(eddyb) this has to be overwritable because we have more than one
-    // format with the same `BIT_WIDTH`, so it's not unambiguous on its own.
-    const REPR_TAG: u8 = Self::BIT_WIDTH as u8;
-
     fn short_lowercase_name() -> String {
         Self::NAME.to_ascii_lowercase().replace("ieee", "f")
     }
@@ -137,20 +133,13 @@ macro_rules! float_reprs {
         extern fn = $cxx_apf_eval_fuzz_op:ident;
         $(type HardFloat = $hard_float_ty:ty;)?
     })+) => {
-        // HACK(eddyb) helper macro used to actually handle all types uniformly.
-        macro_rules! dispatch_any_float_repr_by_repr_tag {
-            (match $repr_tag_value:ident { for<$ty_var:ident: FloatRepr> => $e:expr }) => {
-                // NOTE(eddyb) this doubles as an overlap check: `REPR_TAG`
-                // values across *all* `FloatRepr` `impl` *must* be unique.
-                #[deny(unreachable_patterns)]
-                match $repr_tag_value {
-                    $($name::REPR_TAG => {
-                        type $ty_var = $name;
-                        $e;
-                    })+
-                    _ => {}
-                }
-            }
+        macro_rules! for_each_repr {
+            (for $ty_var:ident in all_floats!() $block:block) => {
+                $({
+                   type $ty_var = $crate::$name;
+                   $block
+                })+
+            };
         }
 
         #[allow(non_camel_case_types)]
@@ -184,8 +173,6 @@ macro_rules! float_reprs {
 
                 const NAME: &'static str = stringify!($name);
                 const KIND: FpKind = FpKind::$name;
-
-                const REPR_TAG: u8 = $repr_tag;
 
                 fn to_ap(self) -> Self::RustcApFloat {
                     Self::RustcApFloat::from_bits(self.to_bits_u128())
@@ -313,6 +300,8 @@ float_reprs! {
     }
 }
 
+pub(crate) use for_each_repr;
+
 fn main() {
     let cli_args = Args::parse();
 
@@ -333,20 +322,7 @@ fn main() {
                 }
             }
             Commands::Decode { files } => run_decode_subcmd(files, &cli_args),
-            Commands::Bruteforce { .. } => {
-                let mut any_mismatches = false;
-                for repr_tag in 0..=u8::MAX {
-                    dispatch_any_float_repr_by_repr_tag!(match repr_tag {
-                        for<F: FloatRepr> => {
-                            any_mismatches |= exhaustive::run_exhaustive::<F>(&cli_args).is_err();
-                        }
-                    });
-                }
-                if any_mismatches {
-                    // FIXME(eddyb) use `fn main() -> ExitStatus`.
-                    std::process::exit(1);
-                }
-            }
+            Commands::Bruteforce { .. } => exhaustive::run_for_all_floats(&cli_args),
         }
         return;
     }
