@@ -574,6 +574,12 @@ impl EvalCfg {
 fn run_decode_subcmd(files: &[PathBuf], cli_args: &Args) {
     let mut buf = Vec::new();
     for path in files {
+        if path.file_name().unwrap_or_default() == "README.txt" {
+            // AFL creates README files in each directory
+            println!("{}: skipping README file", path.display());
+            continue;
+        }
+
         println!("{}{}:{}", term().dim, path.display(), term().rst);
 
         buf.clear();
