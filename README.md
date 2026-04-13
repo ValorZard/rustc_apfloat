@@ -87,6 +87,8 @@ on other platforms, or even some Linux distros, though it mostly assumes UNIX.
 There is a justfile that makes this easy:
 
 ```sh
+# Create the corpus
+just gen
 # Build and run fuzzing
 just fuzz
 # Do the same thing but use more cores
@@ -104,12 +106,14 @@ cargo install cargo-afl
 # Build the fuzzing binary (`target/release/rustc_apfloat-fuzz`).
 cargo afl build -p rustc_apfloat-fuzz --release
 
-# Seed the inputs for a run `foo` (while not ideal, even this one minimal input works).
-mkdir fuzz/in-foo && echo > fuzz/in-foo/empty
+# Seed the inputs for a run `foo`
+cargo run -p rustc_apfloat-fuzz -- corpus fuzz/runs/in-unmin
+# Minimize the results (optional but recommended)
+cargo afl cmin -i fuzz/runs/in-unmin -o fuzz/runs/in -T "$(nproc)" target/release/rustc_apfloat-fuzz
 
 # Start the fuzzing run `foo`, which should bring up the AFL++ progress TUI
 # (see also `cargo run -p rustc_apfloat-fuzz` for extra flags available).
-cargo afl fuzz -i fuzz/run/in-foo -o fuzz/run/out-foo target/release/rustc_apfloat-fuzz
+cargo afl fuzz -i fuzz/runs/in -o fuzz/runs/out-foo target/release/rustc_apfloat-fuzz
 ```
 
 To visualize the fuzzing testcases, you can use the `decode` subcommand:

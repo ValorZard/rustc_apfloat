@@ -3,6 +3,7 @@
 #![allow(internal_features)] // for the below config
 #![feature(cfg_target_has_reliable_f16_f128)]
 
+mod corpus;
 mod exhaustive;
 mod host;
 
@@ -20,7 +21,7 @@ use rustc_apfloat::{Float, FloatConvert, Round, Status, StatusAnd, ieee};
 
 use crate::host::HostFloat;
 
-#[derive(Clone, Parser, Debug)]
+#[derive(Clone, Parser, Debug, Default)]
 struct Args {
     /// Disable comparison with C++ (LLVM's original) APFloat
     #[arg(long)]
@@ -56,6 +57,11 @@ enum Commands {
     Check {
         /// The file to check. If unspecified or `-`, read from stdin.
         file: Option<PathBuf>,
+    },
+    /// Construct a test corpus in the specified directory
+    Corpus {
+        /// The file to check. If unspecified or `-`, read from stdin.
+        outdir: PathBuf,
     },
     /// Decode fuzzing in/out testcases (binary serialized `FuzzOp`s)
     Decode { files: Vec<PathBuf> },
@@ -106,6 +112,7 @@ fn main() {
                 reader.read_to_end(&mut buf).unwrap();
                 fuzz_check(&buf, true);
             }
+            Commands::Corpus { outdir } => corpus::generate(&outdir),
             Commands::Decode { files } => run_decode_subcmd(files, &cli_args),
             Commands::Bruteforce { .. } => exhaustive::run_for_all_floats(&cli_args),
         }
@@ -176,6 +183,7 @@ trait FloatRepr: Copy + Default + Eq + fmt::Display + fmt::Debug {
 
     // FIXME(const) `[u8; Self::BYTE_LEN]` would be better but requires MGCA.
     fn from_le_bytes(bytes: &[u8]) -> Self;
+    fn write_as_le_bytes_into(self, out_bytes: &mut Vec<u8>);
 
     fn to_bits_u128(self) -> u128;
     fn from_bits_u128(bits: u128) -> Self;
@@ -197,7 +205,7 @@ macro_rules! float_reprs {
         $(type HardFloat = $hard_float_ty:ty;)?
     })+) => {
         macro_rules! for_each_repr {
-            (for $ty_var:ident in all_floats!() $block:block) => {
+            (for $ty_var:ident in all_reprs!() $block:block) => {
                 $({
                    type $ty_var = $crate::$name;
                    $block
@@ -232,6 +240,9 @@ macro_rules! float_reprs {
                         <&[u8; Self::BYTE_LEN]>::try_from(bytes).unwrap()
                     );
                     Self(<$repr>::from_le_bytes(repr_bytes))
+                }
+                fn write_as_le_bytes_into(self, out_bytes: &mut Vec<u8>) {
+                    out_bytes.extend(&self.0.to_le_bytes()[..Self::BYTE_LEN]);
                 }
 
                 fn to_bits_u128(self) -> u128 {
@@ -339,7 +350,7 @@ float_reprs! {
 
 pub(crate) use for_each_repr;
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, FromPrimitive)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, FromPrimitive, ToPrimitive)]
 pub enum FpKind {
     // The tag is based on the bit count. These are specified so corpus inputs are stable.
     Ieee16 = 16,
@@ -365,10 +376,6 @@ impl FpKind {
         Self::BrainF16,
         Self::X87_F80,
     ];
-
-    pub fn to_u8(self) -> u8 {
-        self as u8
-    }
 }
 
 /// A testable operation, which can be encoded as a byte.

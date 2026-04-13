@@ -23,6 +23,10 @@ smallvec = { version = "1.11.0", features = ["const_generics", "union"] }
 [dev-dependencies]
 criterion = { version = "0.5.1", features = ["html_reports"] }
 
+# Speed up some things like decoding and corpus generation
+[profile.dev.package.rustc_apfloat-fuzz]
+opt-level = 1
+
 [[bench]]
 name = "decimal"
 harness = false

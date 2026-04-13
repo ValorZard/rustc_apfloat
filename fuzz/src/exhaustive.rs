@@ -18,7 +18,7 @@ use crate::for_each_repr;
 
 pub fn run_for_all_floats(cli_args: &Args) {
     let mut any_mismatches = false;
-    for_each_repr!(for F in all_floats!() {
+    for_each_repr!(for F in all_reprs!() {
         any_mismatches |= run_exhaustive::<F>(&cli_args).is_err();
     });
 
