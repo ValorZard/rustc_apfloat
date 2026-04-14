@@ -167,9 +167,6 @@ trait FloatRepr: Copy + Default + Eq + fmt::Display + fmt::Debug {
     const BIT_WIDTH: usize = Self::RustcApFloat::BITS;
     const BYTE_LEN: usize = (Self::BIT_WIDTH + 7) / 8;
 
-    // Eventually we will have assembly implementations.
-    const HOST_SUPPORTS_FP_ENV: bool = false;
-
     const NAME: &'static str;
 
     const KIND: FpKind;
@@ -196,6 +193,7 @@ trait FloatRepr: Copy + Default + Eq + fmt::Display + fmt::Debug {
         b: Self,
         c: Self,
     ) -> Option<StatusAnd<Self>>;
+    fn host_supports_fp_env() -> bool;
 }
 
 macro_rules! float_reprs {
@@ -274,6 +272,10 @@ macro_rules! float_reprs {
                     None $(.or(
                         Some(eval_host::<$hard_float_ty>(op, rm, a.0, b.0, c.0)?.map(Self))
                     ))?
+                }
+
+                fn host_supports_fp_env() -> bool {
+                    false $(|| <$hard_float_ty>::SUPPORTS_FP_ENV)?
                 }
             }
 
@@ -695,6 +697,7 @@ fn decode_operands<F: FloatRepr>(op: Op, data: &[u8]) -> Result<(F, F, F), Decod
 }
 
 /// Collected outputs from all input sources.
+#[derive(Clone, Debug)]
 struct FuzzOpEvalOutputs<F> {
     rs_apf: StatusAnd<F>,
     cxx_apf: Option<StatusAnd<F>>,
@@ -770,7 +773,7 @@ impl<F: FloatRepr> FuzzOpEvalOutputs<F> {
             host_error: false,
             host_ignore: None,
             host_stat_error: false,
-            host_stat_ignore: (!F::HOST_SUPPORTS_FP_ENV).then_some("host does not support fpenv"),
+            host_stat_ignore: (!F::host_supports_fp_env()).then_some("host does not support fpenv"),
         };
 
         if let Some(cxx_res) = self.cxx_apf {
@@ -779,6 +782,9 @@ impl<F: FloatRepr> FuzzOpEvalOutputs<F> {
             res.cxx_ignore = res
                 .cxx_ignore
                 .or_else(|| ignore_cxx(cfg, a, b, c, self.rs_apf.value, cxx_res.value));
+            res.cxx_stat_ignore = res
+                .cxx_stat_ignore
+                .or_else(|| ignore_cxx_status(cfg, a, b, c, self.rs_apf, cxx_res));
         }
 
         if let Some(host_res) = self.host {
@@ -787,6 +793,9 @@ impl<F: FloatRepr> FuzzOpEvalOutputs<F> {
             res.host_ignore = res
                 .host_ignore
                 .or_else(|| ignore_host(cfg, a, b, c, self.rs_apf.value, host_res.value));
+            res.host_stat_ignore = res
+                .host_stat_ignore
+                .or_else(|| ignore_host_status(cfg, a, b, c, self.rs_apf, host_res));
         }
 
         let failure = (res.cxx_error && res.cxx_ignore.is_none())
@@ -872,6 +881,17 @@ fn ignore_cxx<F: FloatRepr>(
         return Some("unquieted sNaN for same-size float");
     }
 
+    None
+}
+
+fn ignore_cxx_status<F: FloatRepr>(
+    _cfg: &EvalCfg,
+    _a: F,
+    _b: F,
+    _c: F,
+    _rs_apf: StatusAnd<F>,
+    _cxxt_res: StatusAnd<F>,
+) -> Option<&'static str> {
     None
 }
 
@@ -984,6 +1004,33 @@ fn ignore_host<F: FloatRepr>(
     None
 }
 
+fn ignore_host_status<F: FloatRepr>(
+    cfg: &EvalCfg,
+    _a: F,
+    _b: F,
+    _c: F,
+    rs_apf: StatusAnd<F>,
+    host_res: StatusAnd<F>,
+) -> Option<&'static str> {
+    let is_x86 = cfg!(target_arch = "x86_64") || cfg!(target_arch = "x86");
+
+    if is_x86
+        && rs_apf.status == Status::INEXACT
+        && host_res.status == Status::INEXACT | Status::OVERFLOW
+    {
+        return Some("x86 tends to set both overflow and inexact");
+    }
+
+    if is_x86
+        && cfg.op == Op::Rem
+        && matches!(cfg.kind, FpKind::Ieee16 | FpKind::Ieee32 | FpKind::Ieee64)
+    {
+        return Some("host remainder doesn't return status");
+    }
+
+    None
+}
+
 /// Execute the requested operation as an AP float with the given rounding mode.
 fn eval_rust_ap<F: FloatRepr>(op: Op, rm: Round, a: F, b: F, c: F) -> StatusAnd<F>
 where
@@ -1042,7 +1089,7 @@ fn eval_host<F: HostFloat>(
         Op::Mul => a.mul_r(b, rm)?,
         Op::Div => a.div_r(b, rm)?,
         // FIXME: rem disregards rounding mode
-        Op::Rem => Status::OK.and(a.rem(b)),
+        Op::Rem => a.rem(b, rm)?,
         Op::MulAdd => a.mul_add_r(b, c, rm)?,
         // FIXME: the below operations discard a status. We should turn them into
         // unidirectional operations.

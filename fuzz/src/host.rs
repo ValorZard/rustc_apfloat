@@ -6,6 +6,7 @@ use rustc_apfloat::{Round, Status, StatusAnd};
 /// return `None`.
 pub trait HostFloat: Copy + Sized + fmt::Debug {
     type UInt: Copy + fmt::LowerHex;
+    const SUPPORTS_FP_ENV: bool;
     fn from_bits(bits: Self::UInt) -> Self;
     fn to_bits(self) -> Self::UInt;
     fn neg(self) -> Self;
@@ -13,7 +14,7 @@ pub trait HostFloat: Copy + Sized + fmt::Debug {
     fn sub_r(self, other: Self, rm: Round) -> Option<StatusAnd<Self>>;
     fn mul_r(self, other: Self, rm: Round) -> Option<StatusAnd<Self>>;
     fn div_r(self, other: Self, rm: Round) -> Option<StatusAnd<Self>>;
-    fn rem(self, other: Self) -> Self;
+    fn rem(self, other: Self, rm: Round) -> Option<StatusAnd<Self>>;
     fn mul_add_r(self, mul: Self, add: Self, rm: Round) -> Option<StatusAnd<Self>>;
     fn to_i128_r(self, rm: Round) -> Option<StatusAnd<i128>>;
     fn to_u128_r(self, rm: Round) -> Option<StatusAnd<u128>>;
@@ -29,6 +30,7 @@ macro_rules! impl_host_float {
     ($ty:ty, $ity:ty) => {
         impl HostFloat for $ty {
             type UInt = $ity;
+            const SUPPORTS_FP_ENV: bool = false;
             fn from_bits(bits: Self::UInt) -> Self {
                 Self::from_bits(bits)
             }
@@ -50,8 +52,8 @@ macro_rules! impl_host_float {
             fn div_r(self, other: Self, rm: Round) -> Option<StatusAnd<Self>> {
                 no_fp_env(rm, || self / other)
             }
-            fn rem(self, other: Self) -> Self {
-                self % other
+            fn rem(self, other: Self, rm: Round) -> Option<StatusAnd<Self>> {
+                no_fp_env(rm, || self % other)
             }
             fn mul_add_r(self, mul: Self, add: Self, rm: Round) -> Option<StatusAnd<Self>> {
                 no_fp_env(rm, || self.mul_add(mul, add))
@@ -152,6 +154,8 @@ mod x86 {
     impl HostFloat for f16 {
         type UInt = u16;
 
+        const SUPPORTS_FP_ENV: bool = true;
+
         fn from_bits(bits: Self::UInt) -> Self {
             Self::from_bits(bits)
         }
@@ -228,8 +232,8 @@ mod x86 {
             }
         }
 
-        fn rem(self, other: Self) -> Self {
-            self % other
+        fn rem(self, other: Self, rm: Round) -> Option<StatusAnd<Self>> {
+            no_fp_env(rm, || self % other)
         }
 
         fn mul_add_r(mut self, mul: Self, add: Self, rm: Round) -> Option<StatusAnd<Self>> {
@@ -337,6 +341,8 @@ mod x86 {
     impl HostFloat for f32 {
         type UInt = u32;
 
+        const SUPPORTS_FP_ENV: bool = true;
+
         fn from_bits(bits: Self::UInt) -> Self {
             Self::from_bits(bits)
         }
@@ -397,8 +403,8 @@ mod x86 {
             }
         }
 
-        fn rem(self, other: Self) -> Self {
-            self % other
+        fn rem(self, other: Self, rm: Round) -> Option<StatusAnd<Self>> {
+            no_fp_env(rm, || self % other)
         }
 
         fn mul_add_r(mut self, mul: Self, add: Self, rm: Round) -> Option<StatusAnd<Self>> {
@@ -472,6 +478,8 @@ mod x86 {
     impl HostFloat for f64 {
         type UInt = u64;
 
+        const SUPPORTS_FP_ENV: bool = true;
+
         fn from_bits(bits: Self::UInt) -> Self {
             Self::from_bits(bits)
         }
@@ -532,8 +540,8 @@ mod x86 {
             }
         }
 
-        fn rem(self, other: Self) -> Self {
-            self % other
+        fn rem(self, other: Self, rm: Round) -> Option<StatusAnd<Self>> {
+            no_fp_env(rm, || self % other)
         }
 
         fn mul_add_r(mut self, mul: Self, add: Self, rm: Round) -> Option<StatusAnd<Self>> {
