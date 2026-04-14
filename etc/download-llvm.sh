@@ -2,7 +2,7 @@
 # Download the version of LLVM matching this crate's port version to test
 # against.
 
-set -xux
+set -eux
 
 # Find the version and extract everything after the `-` to get the LLVM hash
 version="$(
